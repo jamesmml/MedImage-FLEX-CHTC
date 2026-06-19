@@ -12,18 +12,18 @@ from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 
 # Map to link datasets to their respective paths and their respective CSV data
-# FIXME: If running on an HPC cluster, change dataset paths as needed  
+# FIXME: Change dataset paths as needed (to reflect outermost directory after unzipping .zip file) 
 DATASET_MAP = {
-    "pad_ufes": {"dataset_path": kagglehub.dataset_download("mahdavi1202/skin-cancer"),
+    "pad_ufes": {"dataset_path": "datasets/datasets/mahdavi1202",
             "CSV_NAMES": ["metadata.csv"]},
-    "chexpert": {"dataset_path": kagglehub.dataset_download("ashery/chexpert"),
+    "chexpert": {"dataset_path": "datasets/datasets/ashery",
             "CSV_NAMES": ["train.csv"], "IMAGE_DIRECTORY": "train"},
-    "cbis_ddsm": {"dataset_path": kagglehub.dataset_download("awsaf49/cbis-ddsm-breast-cancer-image-dataset"),
+    "cbis_ddsm": {"dataset_path": "datasets/datasets/awsaf49",
             "CSV_NAMES": ["dicom_info.csv", "calc_case_description_train_set.csv", "mass_case_description_train_set.csv"]},
-    "odir": {"dataset_path": kagglehub.dataset_download("andrewmvd/ocular-disease-recognition-odir5k"),
+    "odir": {"dataset_path": "datasets/datasets/andrewmvd",
             "CSV_NAMES": ["full_df.csv"],
             "IMAGE_DIRECTORY": f"ODIR-5K{os.sep}Training Images"},
-    "ham10000": {"dataset_path": kagglehub.dataset_download("kmader/skin-cancer-mnist-ham10000"),
+    "ham10000": {"dataset_path": "datasets/datasets/kmader",
             "CSV_NAMES": ["HAM10000_metadata.csv"],
             "IMAGE_DIRECTORY": ["ham10000_images_part_1","ham10000_images_part_2"]}
 }

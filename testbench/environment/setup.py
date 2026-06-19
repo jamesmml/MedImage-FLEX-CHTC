@@ -1,5 +1,5 @@
 """
-setup_dependencies.py
+setup.py
 
 Downloads the testbench dependencies.
 """

@@ -1,6 +1,6 @@
 pandas
 numpy
-torch==2.5.1
+torch
 torchvision
 transformers
 sentencepiece

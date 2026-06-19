@@ -11,7 +11,7 @@ can only be allocated once
 
 import torch
 import tensorflow as tf
-from scripts.model_interface import *
+from testbench.scripts.model_interface import *
 from torchvision import models
 
 def build_backend(model_id: str) -> EmbeddingBackend:

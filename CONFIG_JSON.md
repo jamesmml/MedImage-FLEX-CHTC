@@ -1,4 +1,4 @@
-# Configuration JSON Format #
+# Configuration JSON Format
 ```
 # Format
 {
@@ -44,7 +44,7 @@
 }
 ```
 
-## Datasets ##
+## Datasets
 - **Chest radiographs**
     - CheXpert: `"chexpert"`
 - **Skin lesions**
@@ -55,7 +55,7 @@
 - **Ocular fundi**
     - ODIR-5K: `"odir"`
 
-## Citations ##
+## Citations
 Irvin et al. CheXpert Chest X-rays. Stanford AIMI, 2025. doi:10.71718/y7pj-4v93.​
 
 Pacheco et al. PAD-UFES-20: Skin lesions from smartphones. Mendeley Data, 2020. doi:10.17632/zr7vgbcyr2.1.​

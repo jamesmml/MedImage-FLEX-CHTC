@@ -98,10 +98,10 @@ def main():
     write_json(cfg, os.path.join(run_folder, "config_used.json"))
 
     # Load dependecies once JSON file is parsed
-    from scripts.dataloading import load_dataset
-    from scripts.models import build_backend
-    from scripts.extraction import extract_embeddings
-    from scripts.run_benchmark import run_benchmark
+    from testbench.scripts.dataloading import load_dataset
+    from testbench.scripts.models import build_backend
+    from testbench.scripts.extraction import extract_embeddings
+    from testbench.scripts.run_benchmark import run_benchmark
 
     print(f"\n=== Running Benchmark: {model_name} ===")
     print(f"Model: {model_id}")
