@@ -1,0 +1,12 @@
+Dockerfile
+.git/
+.gitignore
+__pycache__/
+.vscode/
+*.md
+*.swp
+embeddings/
+results/
+configs/
+scripts/__pycache__/
+download-datasets.sh

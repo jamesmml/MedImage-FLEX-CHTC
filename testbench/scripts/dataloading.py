@@ -6,7 +6,6 @@ This file contains the functions for loading the datasets.
 
 import os
 import pandas as pd
-import kagglehub
 from torch import nn as nn
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
