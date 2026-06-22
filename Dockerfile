@@ -1,6 +1,6 @@
 # --- BUILD ---
-# Use a Miniconda image (version 26.1.1) as the base
-FROM anaconda/miniconda3:26.1.1
+# Use a Miniconda image (version 26.3.2) as the base
+FROM anaconda/miniconda:26.3.2
 
 # Set a working directory
 WORKDIR /app
@@ -9,7 +9,7 @@ WORKDIR /app
 COPY . .
 
 # FIXME: Add your model's environment config file
-COPY ../conda_envs/medflamingo.yml .
+COPY ./conda_envs/medflamingo.yml .
 
 # Download the testbench dependencies
 RUN python ./testbench/environment/setup.py

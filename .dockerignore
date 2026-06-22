@@ -9,4 +9,5 @@ embeddings/
 results/
 configs/
 scripts/__pycache__/
+conda_envs/
 download-datasets.sh
