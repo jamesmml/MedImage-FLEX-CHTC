@@ -109,7 +109,7 @@ class HuggingFaceVisionBackend(EmbeddingBackend):
 
         self.processor = image_processor
 
-        checkpoint_path = hf_hub_download(model_id, "model.pt")
+        checkpoint_path = hf_hub_download(model_id, "model.pt", local_dir = "./medflamingo")
         model.load_state_dict(torch.load(checkpoint_path, map_location = device), strict = False)
 
         model.vision_encoder = model.vision_encoder.to("cuda")
