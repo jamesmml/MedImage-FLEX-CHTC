@@ -1,4 +1,3 @@
-# --- BUILD ---
 # Use a Miniconda image (version 26.3.2) as the base
 FROM anaconda/miniconda:26.3.2
 
@@ -20,6 +19,3 @@ RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkg
     conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r && \
     conda env update --name base --file ./medflamingo.yml && \
     conda clean --all -y && rm ./medflamingo.yml
-
-# --- EXECUTE ---
-ENTRYPOINT ["bash", "./execute-testbench.sh"]
