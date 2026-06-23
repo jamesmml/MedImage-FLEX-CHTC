@@ -1,6 +1,9 @@
 # Use a Miniconda image (version 26.3.2) as the base
 FROM anaconda/miniconda:26.3.2
 
+# Obtain the unzip utility
+RUN apt-get update && apt-get install -y unzip && rm -rf /var/lib/apt/lists/*
+
 # Set a working directory
 WORKDIR /app
 
