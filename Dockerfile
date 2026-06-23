@@ -4,14 +4,12 @@ FROM anaconda/miniconda:26.3.2
 # Set a working directory
 WORKDIR /app
 
-# Load testbench (manual build, use git pull to obtain most recent version)
-COPY . .
-
 # NOTE: Add your model's environment config file
 COPY ./conda_envs/medflamingo.yml .
 
 # Download the testbench dependencies
-RUN python ./testbench/environment/setup.py
+COPY ./testbench/environment/ ./environment/
+RUN python ./environment/setup.py
 
 # Download the model dependencies
 # NOTE: Add or remove channels as needed 
