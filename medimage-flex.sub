@@ -1,0 +1,28 @@
+# medimage-flex.sub
+
+universe = container
+container_image = docker://jamesmml/medimage-flex-medflamingo:v1
+   
+executable = ./execute-testbench.sh
+   		
+log = medimage-flex.log
+error = medimage-flex.err
+output = medimage-flex.out
+   
+# File transfers
+should_transfer_files = YES
+transfer_input_files = ./testbench, osdf:///chtc/staging/m/milgram2/datasets.zip, ./medflamingo/config.json
+transfer_output_files = embeddings, results
+when_to_transfer_output = ON_EXIT
+
+# Request hardware
+request_gpus = 3
++GPUJobLength = "medium"
+gpus_minimum_memory = 10GB
+
+request_cpus = 1
+request_memory = 32GB
+request_disk = 50GB
+   
+# Run MedImage-FLEX
+queue
