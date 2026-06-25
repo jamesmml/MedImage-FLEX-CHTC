@@ -5,6 +5,7 @@ This file contains the backend logic the for various model types.
 """
 import io
 import base64
+from PIL import Image
 import os
 import json
 from abc import ABC, abstractmethod
@@ -123,7 +124,7 @@ class HuggingFaceVisionBackend(EmbeddingBackend):
         # import tensorflow_text
         # import tensorflow_hub as hub
 
-        # MODEL_PATH = "path/to/model"
+        # MODEL_PATH = "cxr-foundation/"
 
         # loaded_model = hub.load(MODEL_PATH)
 
