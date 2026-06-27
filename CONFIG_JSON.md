@@ -1,11 +1,9 @@
 # Configuration JSON Format
+**NOTE: FILE MUST BE NAMED `config.json`**
 ```
 # Format
 {
     "model_id": Unique model ID, path, or link used to instantiate the model,
-
-    "output_dir": Custom results output directory
-                  (optional, default is results/),
 
     "dataset": {
         "datasets": [
@@ -21,14 +19,16 @@
         "shuffle": Flag for shuffling images while
                    computing embeddings
                    (optional, default is false)
+    },
+
+    "embeddings": {
+        "normalize": Flag for normalizing embeddings (optional, default is true)
     }
 }
 
 # Sample
 {
-    "model_id": "microsoft/rad-dino"
-
-    "output_dir": "custom_output_folder",
+    "model_id": "microsoft/rad-dino",
 
     "dataset": {
         "datasets": [

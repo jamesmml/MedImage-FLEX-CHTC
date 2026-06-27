@@ -1,27 +1,37 @@
 # MedImage-FLEX-CHTC: Medical Image Foundation Latent Embedding eXamination (UW-Madison Internal Use)
 
 ## Setup
-1. Prior to setup, it is recommended to set up a separate environment using the correct Python version (3.11.15)
+1. Clone the GitHub repo locally
+2. Build your environment (see [`Dockerfile`](Dockerfile))
 ```
-# Example using conda
-conda create -n testbench python=3.11.15
-conda activate testbench
+# Example
+docker build -t medimage-flex-bucky-model:v1 .
+docker tag medimage-flex-bucky-model:v1 bucky/medimage-flex-bucky-model:v1
+docker push bucky/medimage-flex-bucky-model:v1
 ```
-2. Clone the GitHub repo
-3. Navigate into to [`environment`](environment/) and run `python setup.py` to download dependencies
+3. Copy bash scripts to access point
 ```
-cd environment
-python setup.py
-cd ..
+scp *.sh bucky@ap2002.chtc.wisc.edu:/home/bucky 
+```
+4. Download the datasets to your staging directory (see [`download-datasets.sh`](download-datasets.sh))
+```
+bash download-datasets.sh /staging/b/bucky/datasets.zip
 ```
 ## Running the Testbench
 1. Choose your model 
-2. Add its `model_id` and loading logic to [`scripts/models.py`](scripts/models.py)
-3. Create a model configuration JSON file with respect to the format in `CONFIG_JSON.md`
-4. Run the testbench
+2. Add its `model_id` and loading logic to [`testbench/scripts/models.py`](testbench/scripts/models.py)
+3. Create a model configuration JSON file with respect to the format in [`CONFIG_JSON.md`](CONFIG_JSON.md)
+4. Copy testbench code to access point
 ```
-python main.py --config path_to_config_json
+scp -r testbench/ bucky@ap2002.chtc.wisc.edu:/home/bucky
+scp config.json bucky@ap2002.chtc.wisc.edu:/home/bucky
 ```
-5. If the model requires specific logic not handled by default, edit [`scripts/model_interface.py`](scripts/model_interface.py) for the model's framework (PyTorch, HuggingFace, or TensorFlow)
+5. Create a submit file (see [`sample.sub`](sample.sub), [`execute-testbench.sh`](execute-testbench.sh))
+6. Run the testbench
+```
+# Example
+condor_submit sample.sub
+```
+7. If the model requires specific logic not handled by default, edit [`testbench/scripts/model_interface.py`](testbench/scripts/model_interface.py) for the model's framework (PyTorch, HuggingFace, or TensorFlow)
 
 **NOTE: Any personal access tokens or keys for models must be loaded locally**

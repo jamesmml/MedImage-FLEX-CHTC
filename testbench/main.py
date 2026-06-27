@@ -72,14 +72,14 @@ def main():
 
     model_id = cfg["model_id"]
     model_name = clean_name(model_id, "-")
-    output_dir = cfg.get("output_dir", f".{os.sep}results")
+    output_dir = f".{os.sep}results"
 
     datasets = cfg["dataset"]["datasets"]
     batch_size = cfg["dataset"].get("batch_size", 32)
     shuffle = cfg["dataset"].get("shuffle", False)
 
     normalize_embeddings = cfg["embeddings"].get("normalize", True)
-    cache_embeddings = cfg["embeddings"].get("cache", False)
+    cache_embeddings = True
 
     os.makedirs(output_dir, exist_ok = True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
