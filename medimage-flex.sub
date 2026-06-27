@@ -11,7 +11,7 @@ output = medflamingo_$(Cluster)_$(Process).out
 
 # File transfers
 should_transfer_files = YES
-transfer_input_files = ./testbench, ./medflamingo/config.json, osdf:///chtc/staging/m/milgram2/datasets.zip
+transfer_input_files = ./testbench, ./model_configs/medflamingo/config.json, osdf:///chtc/staging/m/milgram2/datasets.zip
 transfer_output_files = embeddings, results
 when_to_transfer_output = ON_EXIT
 

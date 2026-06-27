@@ -4,5 +4,5 @@ __pycache__/
 embeddings/
 results/
 configs/
-scripts/__pycache__/
+testbench/scripts/__pycache__/
 conda_envs/

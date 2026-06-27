@@ -6,7 +6,7 @@ This file contains the logic for extracting embeddings from a dataset.
 
 import os
 import numpy as np
-from testbench.scripts.model_interface import EmbeddingBackend
+from scripts.model_interface import EmbeddingBackend
 from tqdm import tqdm
 
 PROHIBITED_CHARS = ["\\", "/", ":", "*", "?", "\"", "<", ">", "|"]

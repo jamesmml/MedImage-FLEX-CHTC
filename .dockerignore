@@ -5,8 +5,10 @@ __pycache__/
 .vscode/
 *.md
 *.swp
+*.sub
 embeddings/
 results/
 configs/
-scripts/__pycache__/
+testbench/scripts/__pycache__/
 download-datasets.sh
+execute-testbench.sh

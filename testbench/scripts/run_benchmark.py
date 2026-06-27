@@ -4,7 +4,7 @@ run_benchmark.py
 This file executes the testbench.
 """
 
-from testbench.scripts.tests import *
+from scripts.tests import *
 
 def run_benchmark(dataset_name, embeddings, metadata_df, image_paths, id_col, label_col):
     """
