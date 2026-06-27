@@ -6,7 +6,7 @@ This file contains the logic for extracting embeddings from a dataset.
 
 import os
 import numpy as np
-from scripts.model_interface import EmbeddingBackend
+from testbench.scripts.model_interface import EmbeddingBackend
 from tqdm import tqdm
 
 PROHIBITED_CHARS = ["\\", "/", ":", "*", "?", "\"", "<", ">", "|"]
@@ -47,7 +47,7 @@ def extract_embeddings(dataloader, backend: EmbeddingBackend, normalize = True, 
     # Prepare filename and clean it to prevent path issues
     filename = backend.model_id + "+" + dataloader.dataset_name
     filename = clean_filename(filename, "-").replace(".", "")
-    filepath = f"..{os.sep}embeddings{os.sep}{filename}.npy"
+    filepath = f".{os.sep}embeddings{os.sep}{filename}.npy"
 
     if os.path.exists(filepath):
         print(f"Embeddings file detected! Loading \'{os.path.abspath(filepath)}\'")
@@ -69,7 +69,7 @@ def extract_embeddings(dataloader, backend: EmbeddingBackend, normalize = True, 
     all_embs = np.concatenate(all_embs, axis = 0)
     
     if cache:
-        os.makedirs(f"..{os.sep}embeddings", exist_ok = True)
+        os.makedirs(f".{os.sep}embeddings", exist_ok = True)
         
         # Prevents overwriting embedding files
         if not os.path.exists(filepath):

@@ -21,9 +21,8 @@ DATASET_COL_MAP = {"pad_ufes": ("img_id", "diagnostic"), "cbis_ddsm": ("image fi
 ID_COL_IDX = 0
 LABEL_COL_IDX = 1
 
-# Make the current directory (for the subprocess) relative to the testbench
-script_dir = os.path.dirname(os.path.abspath(__file__))
-os.chdir(script_dir)
+# Make the directory (for the subprocess) relative to the working directory of the container
+os.chdir(os.path.pardir)
 
 python = sys.executable
 
@@ -79,7 +78,7 @@ def main():
 
     model_id = cfg["model_id"]
     model_name = clean_name(model_id, "-")
-    output_dir = cfg.get("output_dir", f"..{os.sep}results")
+    output_dir = cfg.get("output_dir", f".{os.sep}results")
 
     datasets = cfg["dataset"]["datasets"]
     batch_size = cfg["dataset"].get("batch_size", 32)
@@ -98,10 +97,10 @@ def main():
     write_json(cfg, os.path.join(run_folder, "config_used.json"))
 
     # Load dependecies once JSON file is parsed
-    from scripts.dataloading import load_dataset
-    from scripts.models import build_backend
-    from scripts.extraction import extract_embeddings
-    from scripts.run_benchmark import run_benchmark
+    from testbench.scripts.dataloading import load_dataset
+    from testbench.scripts.models import build_backend
+    from testbench.scripts.extraction import extract_embeddings
+    from testbench.scripts.run_benchmark import run_benchmark
 
     print(f"\n=== Running Benchmark: {model_name} ===")
     print(f"Model: {model_id}")
