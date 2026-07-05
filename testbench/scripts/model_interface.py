@@ -171,7 +171,7 @@ class HuggingFaceVisionBackend(EmbeddingBackend):
         images = torch.cat(images, dim = 0).to(self.device)
 
         # 1. Get raw CLIP features
-        vision_features = self.model.vision_encoder(images)
+        vision_features = self.model.vision_encoder.visual(images)
         
         # 2. Pass through the learned Medical Perceiver Resampler
         # Shape: [1, 1, 64, 1024]

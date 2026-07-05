@@ -16,11 +16,11 @@ transfer_output_files = embeddings, results
 when_to_transfer_output = ON_EXIT
 
 # Request hardware
-# request_gpus = 3
-# +GPUJobLength = "medium"
-# gpus_minimum_memory = 10GB
+request_gpus = 2
++GPUJobLength = "medium"
+gpus_minimum_memory = 10GB
 
-request_cpus = 5
+request_cpus = 12
 request_memory = 64GB
 request_disk = 100GB
 

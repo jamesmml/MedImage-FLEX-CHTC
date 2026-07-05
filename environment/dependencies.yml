@@ -1,0 +1,22 @@
+name: dependencies
+
+channels:
+  - defaults
+
+dependencies:
+  - pandas
+  - numpy
+  - pytorch
+  - torchvision
+  - transformers
+  - sentencepiece
+  - protobuf
+  - pillow
+  - scikit-learn
+  - tensorflow
+  - tqdm
+  - optuna
+  - pip
+  - pip:
+      - kagglehub
+      - huggingface
