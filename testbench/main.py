@@ -79,7 +79,9 @@ def main():
     shuffle = cfg["dataset"].get("shuffle", False)
 
     normalize_embeddings = cfg["embeddings"].get("normalize", True)
+    
     cache_embeddings = True
+    os.makedirs(f".{os.sep}embeddings", exist_ok = True)
 
     os.makedirs(output_dir, exist_ok = True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

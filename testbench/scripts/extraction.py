@@ -69,8 +69,6 @@ def extract_embeddings(dataloader, backend: EmbeddingBackend, normalize = True, 
     all_embs = np.concatenate(all_embs, axis = 0)
     
     if cache:
-        os.makedirs(f".{os.sep}embeddings", exist_ok = True)
-        
         # Prevents overwriting embedding files
         if not os.path.exists(filepath):
             np.save(filepath, all_embs)
