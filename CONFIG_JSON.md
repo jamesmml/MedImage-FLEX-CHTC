@@ -21,9 +21,7 @@
                    (optional, default is false)
     },
 
-    "embeddings": {
-        "normalize": Flag for normalizing embeddings (optional, default is true)
-    }
+    "normalize_embeddings": Flag for normalizing embeddings (optional, default is true)
 }
 
 # Sample

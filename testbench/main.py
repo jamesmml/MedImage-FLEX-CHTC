@@ -78,7 +78,7 @@ def main():
     batch_size = cfg["dataset"].get("batch_size", 32)
     shuffle = cfg["dataset"].get("shuffle", False)
 
-    normalize_embeddings = cfg["embeddings"].get("normalize", True)
+    normalize_embeddings = cfg.get("normalize_embeddings", True)
     
     cache_embeddings = True
     os.makedirs(f".{os.sep}embeddings", exist_ok = True)
