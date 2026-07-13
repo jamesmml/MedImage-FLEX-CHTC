@@ -19,13 +19,13 @@ transfer_output_files = embeddings, results
 when_to_transfer_output = ON_EXIT_OR_EVICT
 
 # Request hardware
-request_gpus = 2
+request_gpus = 1
 +GPUJobLength = "medium"
 gpus_minimum_memory = 10GB
 gpus_minimum_capability = 7.0
 
-request_cpus = 12
-request_memory = 64GB
+request_cpus = 6
+request_memory = 128GB
 request_disk = 100GB
 
 # Run MedImage-FLEX
