@@ -1,5 +1,5 @@
 # NVIDIA's official CUDA runtime image as the base
-FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
 # Install system utilities
 RUN apt-get update && apt-get install -y wget unzip libgomp1 && rm -rf /var/lib/apt/lists/*
@@ -11,6 +11,9 @@ RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -
 
 # Add Conda to the system path
 ENV PATH="/opt/miniconda/bin:$PATH"
+
+# Accept Conda TOS
+ENV CONDA_PLUGINS_AUTO_ACCEPT_TOS=true
 
 # Set a working directory
 WORKDIR /app
@@ -25,16 +28,14 @@ ENV TORCHINDUCTOR_CACHE_DIR=/tmp/cache
 
 # Download the testbench dependencies
 COPY ./environment/dependencies.yml .
-RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
-    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r && \
-    conda env update --name base --file ./dependencies.yml && rm ./dependencies.yml
+RUN conda env update --name base --file ./dependencies.yml && rm ./dependencies.yml
 
 # NOTE: Add your model's environment config file
-COPY ./conda_envs/medflamingo.yml .
+COPY ./conda_envs/cxr-foundation.yml .
 
 # Download the model dependencies
 # NOTE: Add or remove channels as needed
 RUN conda clean --all -y && \
-    conda env update --name base --file ./medflamingo.yml && \
-    conda clean --all -y && rm ./medflamingo.yml && \
+    conda env update --name base --file ./cxr-foundation.yml && \
+    conda clean --all -y && rm ./cxr-foundation.yml && \
     pip uninstall -y triton

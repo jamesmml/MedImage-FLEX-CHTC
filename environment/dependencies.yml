@@ -4,19 +4,20 @@ channels:
   - defaults
 
 dependencies:
+  - python=3.11.15
   - pandas
   - numpy
-  - pytorch
-  - torchvision
   - transformers
   - sentencepiece
   - protobuf
   - pillow
   - scikit-learn
-  - tensorflow
   - tqdm
   - optuna
   - pip
   - pip:
+      - torch
+      - torchvision
+      - tensorflow
       - kagglehub
       - huggingface
