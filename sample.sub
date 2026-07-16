@@ -21,10 +21,9 @@ when_to_transfer_output = ON_EXIT_OR_EVICT
 # Request hardware
 request_gpus = 1
 +GPUJobLength = "medium"
-gpus_minimum_memory = 10GB
-gpus_minimum_capability = 7.0
+gpus_minimum_capability = 8.0
 
-request_cpus = 6
+request_cpus = 8
 request_memory = 128GB
 request_disk = 100GB
 

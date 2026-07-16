@@ -207,7 +207,7 @@ def load_dataset(dataset_name, transform = None, batch_size = 32, shuffle = Fals
 
     # FIXME: Edit num_workers as needed
     dataloader = DataLoader(general_dataset, batch_size, shuffle, \
-            collate_fn = lambda batch : list(zip(*batch)), num_workers = 2)
+            collate_fn = lambda batch : list(zip(*batch)), num_workers = 6)
     dataloader.dataset_name = dataset_name
     
     return dataloader, metadata_df
