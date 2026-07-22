@@ -32,6 +32,6 @@ scp config.json bucky@ap2002.chtc.wisc.edu:/home/bucky
 # Example
 condor_submit sample.sub
 ```
-7. If the model requires specific logic not handled by default, edit [`testbench/scripts/model_interface.py`](testbench/scripts/model_interface.py) for the model's framework (PyTorch, HuggingFace, or TensorFlow)
+7. MedImage-FLEX-CHTC offers default model logic as a convenience for three popular frameworks: PyTorch, HuggingFace, and TensorFlow. If a model requires specific logic not handled by default, edit [`testbench/scripts/model_interface.py`](testbench/scripts/model_interface.py), [`testbench/scripts/custom_transforms.py`](testbench/scripts/custom_transforms.py) as needed.
 
 **NOTE: Any personal access tokens or keys for models must be loaded locally**
