@@ -3,11 +3,8 @@ model_interface.py
 
 This file contains the backend logic the for various model types.
 """
-import io
-import base64
+
 from PIL import Image
-import os
-import json
 from abc import ABC, abstractmethod
 import torch
 import numpy as np
@@ -19,6 +16,20 @@ class EmbeddingBackend(ABC):
     def __init__(self, model_id, device):
         self.model_id = model_id
         self.device = device
+
+    def transform_function(self, image):
+        """
+        NOTE: OPTIONAL, must be implemented by a user
+
+        Used to implement custom image transformations.
+
+        Args:
+            image : A raw medical image (e.g. PIL, NumPy, Tensor, etc.)
+
+        Returns:
+            A transformed image
+        """
+        return None
 
     @abstractmethod
     def get_transform(self):
@@ -120,18 +131,6 @@ class HuggingFaceVisionBackend(EmbeddingBackend):
         self.model = model
         self.target_size = (224, 224)
 
-        # --- CXR-Foundation ---
-        # import tensorflow_text
-        # import tensorflow_hub as hub
-
-        # MODEL_PATH = "cxr-foundation/"
-
-        # loaded_model = hub.load(MODEL_PATH)
-
-        # model = loaded_model.signatures["serving_default"]
-
-        # self.model = model
-
         # --- General models ---
         # self.target_size = tuple(target_size)
         # self.model = AutoModel.from_pretrained(model_id, trust_remote_code = True).to(device).eval()
@@ -151,14 +150,6 @@ class HuggingFaceVisionBackend(EmbeddingBackend):
     def get_transform(self):
         # Usually we bypass torch transforms and let the processor handle everything
         return None
-
-        # --- CXR-Foundation ---
-        # def transform(img):
-        #     # Safe, high-speed resizing executed in parallel by CPU workers
-        #     img = img.resize((1024, 1024), resample=Image.Resampling.BILINEAR)
-        #     return img
-
-        # return transform
         
     @torch.no_grad()
     def encode_batch(self, images):
@@ -187,48 +178,6 @@ class HuggingFaceVisionBackend(EmbeddingBackend):
         embs = med_embeddings.mean(dim = 1)
 
         return embs
-
-        # --- CXR-Foundation ---
-        # embs = []
-        # strings = []
-
-        # for img in images:
-        #     # 3. Compress directly into JPEG bytes in memory
-        #     buffer = io.BytesIO()
-        #     img.save(buffer, format="JPEG", quality=95)
-        #     image_bytes = buffer.getvalue()
-            
-        #     # 4. Wrap into Google's protocol buffer structure
-        #     tf_example = tf.train.Example(
-        #         features=tf.train.Features(
-        #             feature={
-        #                 'image/encoded': tf.train.Feature(
-        #                     bytes_list=tf.train.BytesList(value=[image_bytes])
-        #                 )
-        #             }
-        #         )
-        #     )
-
-        #     strings.append(tf.convert_to_tensor([tf_example.SerializeToString()], dtype = tf.string))
-            
-        # for string in strings:
-        #     # 2. Fire inference using the exact expected input signature key
-        #     output_dict = self.model(input_example = string)
-            
-        #     # 3. Grab the raw feature map array -> Shape: [Batch_Size, 8, 8, 1376]
-        #     raw_feature_maps = output_dict["feature_maps_0"]
-            
-        #     # 4. Perform Global Average Pooling across the spatial dimensions (axis 1 and 2)
-        #     # This collapses the 8x8 grid into a flat vector while preserving channels.
-        #     # Shape drops from [Batch_Size, 8, 8, 1376] to [Batch_Size, 1376]
-        #     pooled_vectors = tf.reduce_mean(raw_feature_maps, axis = [1, 2])
-
-        #     embs.append(pooled_vectors)
-        
-        # embs = [emb.numpy() for emb in embs]
-        # embs = np.concatenate(embs, axis = 0)
-
-        # return embs
 
         # --- General models ---
         # if isinstance(images, tuple):
