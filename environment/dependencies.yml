@@ -7,17 +7,13 @@ dependencies:
   - python=3.11.15
   - pandas
   - numpy
-  - transformers
-  - sentencepiece
   - protobuf
-  - pillow
-  - scikit-learn
   - tqdm
   - optuna
   - pip
   - pip:
-      - torch
-      - torchvision
-      - tensorflow
-      - kagglehub
-      - huggingface
+    - transformers
+    - sentencepiece
+    - scikit-learn
+    - pillow
+    - kagglehub

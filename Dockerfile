@@ -1,5 +1,5 @@
-# NVIDIA's official CUDA runtime image as the base
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+# Ubuntu base image
+FROM ubuntu:22.04
 
 # Install system utilities
 RUN apt-get update && apt-get install -y wget unzip libgomp1 && rm -rf /var/lib/apt/lists/*
@@ -15,6 +15,12 @@ ENV PATH="/opt/miniconda/bin:$PATH"
 # Accept Conda TOS
 ENV CONDA_PLUGINS_AUTO_ACCEPT_TOS=true
 
+# Disable pip's local cache to keep container lean
+ENV PIP_NO_CACHE_DIR=1
+
+# Force PyTorch to not use triton (triton has caused issues, remove if it is needed)
+ENV TORCH_USE_TRITON=0
+
 # Set a working directory
 WORKDIR /app
 
@@ -27,15 +33,13 @@ ENV XDG_CACHE_HOME=/tmp/cache
 ENV TORCHINDUCTOR_CACHE_DIR=/tmp/cache
 
 # Download the testbench dependencies
-COPY ./environment/dependencies.yml .
-RUN conda env update --name base --file ./dependencies.yml && rm ./dependencies.yml
+COPY ./environment/* .
+RUN bash ./setup.sh && rm ./setup.sh ./dependencies.yml
 
 # NOTE: Add your model's environment config file
 COPY ./conda_envs/cxr-foundation.yml .
 
 # Download the model dependencies
-# NOTE: Add or remove channels as needed
 RUN conda clean --all -y && \
     conda env update --name base --file ./cxr-foundation.yml && \
-    conda clean --all -y && rm ./cxr-foundation.yml && \
-    pip uninstall -y triton
+    conda clean --all -y && rm ./cxr-foundation.yml
