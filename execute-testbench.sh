@@ -6,4 +6,4 @@ echo "Unzipping complete!"
 
 # --- Run the testbench ---
 echo "Running the testbench..."
-python -X faulthandler ./testbench/main.py --config ./config.json
+conda run -s -n base python -X faulthandler ./testbench/main.py --num-workers 4 --config ./config.json
