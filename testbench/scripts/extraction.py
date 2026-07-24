@@ -6,12 +6,11 @@ This file contains the logic for extracting embeddings from a dataset.
 
 import os
 import numpy as np
-from scripts.model_interface import EmbeddingBackend
 from tqdm import tqdm
 
 PROHIBITED_CHARS = ["\\", "/", ":", "*", "?", "\"", "<", ">", "|"]
 
-def extract_embeddings(dataloader, backend: EmbeddingBackend, normalize = True, cache = False):
+def extract_embeddings(dataloader, backend, normalize = True, cache = False):
     """
     Extracts the embeddings for a given model from a given dataset.
 
@@ -20,10 +19,13 @@ def extract_embeddings(dataloader, backend: EmbeddingBackend, normalize = True, 
         backend : EmbeddingBackend object used to reference a model
         normalize : If True, embeddings are normalized
         cache : If True, embeddings are stored locally to prevent future recomputation
+        return_metadata : If True, include embedding source metadata
     
     Returns:
         all_embs : A list of all embeddings - one per image
         all_paths : A list of all local, absolute image paths
+        source : Whether embeddings were computed or loaded from cache
+
     """
     all_embs = []
     all_paths = []
@@ -53,8 +55,9 @@ def extract_embeddings(dataloader, backend: EmbeddingBackend, normalize = True, 
         print(f"Embeddings file detected! Loading \'{os.path.abspath(filepath)}\'")
         all_embs = np.load(filepath)
         all_paths = dataloader.dataset.image_paths
-        
-        return all_embs, all_paths
+        source = "cache"
+
+        return all_embs, all_paths, source
 
     for batch in tqdm(dataloader, desc = "Extracting embeddings"):
         images, paths = batch
@@ -67,11 +70,14 @@ def extract_embeddings(dataloader, backend: EmbeddingBackend, normalize = True, 
         all_paths.extend(paths)
 
     all_embs = np.concatenate(all_embs, axis = 0)
+    source = "computed"
     
     if cache:
+        os.makedirs(f".{os.sep}embeddings", exist_ok = True)
+        
         # Prevents overwriting embedding files
         if not os.path.exists(filepath):
             np.save(filepath, all_embs)
             print(f"Embeddings cached to: {os.path.abspath(filepath)}\n")
 
-    return all_embs, all_paths
+    return all_embs, all_paths, source
