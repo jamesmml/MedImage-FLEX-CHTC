@@ -8,6 +8,7 @@ __pycache__/
 *.sub
 embeddings/
 results/
+manifests/
 configs/
 testbench/scripts/__pycache__/
 download-datasets.sh

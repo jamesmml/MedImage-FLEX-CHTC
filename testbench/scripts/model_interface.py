@@ -108,44 +108,44 @@ class HuggingFaceVisionBackend(EmbeddingBackend):
         super().__init__(model_id, device)
 
         # --- Med-Flamingo ---
-        from huggingface_hub import hf_hub_download
-        from open_flamingo import create_model_and_transforms
+        # from huggingface_hub import hf_hub_download
+        # from open_flamingo import create_model_and_transforms
 
-        model, image_processor, _ = create_model_and_transforms(
-            clip_vision_encoder_path = "ViT-L-14",
-            clip_vision_encoder_pretrained = "openai",
-            lang_encoder_path = "huggyllama/llama-7b",
-            tokenizer_path = "huggyllama/llama-7b",
-            cross_attn_every_n_layers = 4
-        )
+        # model, image_processor, _ = create_model_and_transforms(
+        #     clip_vision_encoder_path = "ViT-L-14",
+        #     clip_vision_encoder_pretrained = "openai",
+        #     lang_encoder_path = "huggyllama/llama-7b",
+        #     tokenizer_path = "huggyllama/llama-7b",
+        #     cross_attn_every_n_layers = 4
+        # )
 
-        self.processor = image_processor
+        # self.processor = image_processor
 
-        checkpoint_path = hf_hub_download(model_id, "model.pt", local_dir = "./medflamingo")
-        model.load_state_dict(torch.load(checkpoint_path, map_location = device), strict = False)
+        # checkpoint_path = hf_hub_download(model_id, "model.pt", local_dir = "./medflamingo")
+        # model.load_state_dict(torch.load(checkpoint_path, map_location = device), strict = False)
 
-        model.vision_encoder = model.vision_encoder.to("cuda")
-        model.perceiver = model.perceiver.to("cuda")
-        model.eval()
+        # model.vision_encoder = model.vision_encoder.to("cuda")
+        # model.perceiver = model.perceiver.to("cuda")
+        # model.eval()
 
-        self.model = model
-        self.target_size = (224, 224)
+        # self.model = model
+        # self.target_size = (224, 224)
 
         # --- General models ---
-        # self.target_size = tuple(target_size)
-        # self.model = AutoModel.from_pretrained(model_id, trust_remote_code = True).to(device).eval()
+        self.target_size = tuple(target_size)
+        self.model = AutoModel.from_pretrained(model_id, trust_remote_code = True).to(device).eval()
         
-        # # Try three different ways to load an image processor 
-        # try:
-        #     self.processor = AutoProcessor.from_pretrained(model_id, trust_remote_code = True, use_fast = True)
-        # except Exception:
-        #     try:
-        #         self.processor = AutoImageProcessor.from_pretrained(model_id, trust_remote_code = True, use_fast = True)
-        #     except Exception:
-        #         self.processor = AutoFeatureExtractor.from_pretrained(model_id, trust_remote_code = True, use_fast = True)
+        # Try three different ways to load an image processor 
+        try:
+            self.processor = AutoProcessor.from_pretrained(model_id, trust_remote_code = True, use_fast = True)
+        except Exception:
+            try:
+                self.processor = AutoImageProcessor.from_pretrained(model_id, trust_remote_code = True, use_fast = True)
+            except Exception:
+                self.processor = AutoFeatureExtractor.from_pretrained(model_id, trust_remote_code = True, use_fast = True)
 
-        # # If the user does NOT specify output_key, we auto-detect it later
-        # self.output_key = output_key
+        # If the user does NOT specify output_key, we auto-detect it later
+        self.output_key = output_key
 
     def get_transform(self):
         # Usually we bypass torch transforms and let the processor handle everything
@@ -157,78 +157,78 @@ class HuggingFaceVisionBackend(EmbeddingBackend):
         Computes the embeddings for a batch of images.
         """
         # --- Med-Flamingo ---
-        images = [self.processor(img).unsqueeze(0) for img in images]
+        # images = [self.processor(img).unsqueeze(0) for img in images]
 
-        images = torch.cat(images, dim = 0).to(self.device)
+        # images = torch.cat(images, dim = 0).to(self.device)
 
-        # 1. Get raw CLIP features
-        vision_features = self.model.vision_encoder.visual(images)
+        # # Get raw CLIP features
+        # vision_features = self.model.vision_encoder.visual(images)
         
-        # 2. Pass through the learned Medical Perceiver Resampler
-        # Shape: [1, 1, 64, 1024]
-        med_embeddings = self.model.perceiver(vision_features[1].unsqueeze(1).unsqueeze(3))
+        # # Pass through the learned Medical Perceiver Resampler
+        # # Shape: [1, 1, 64, 1024]
+        # med_embeddings = self.model.perceiver(vision_features[1].unsqueeze(1).unsqueeze(3))
         
-        # 4. Remove the useless '1' dimension
-        # Shape becomes: [Batch_Size, 64, 1024]
-        med_embeddings = med_embeddings.squeeze(1)
+        # # Remove the useless '1' dimension
+        # # Shape becomes: [Batch_Size, 64, 1024]
+        # med_embeddings = med_embeddings.squeeze(1)
         
-        # 5. Collapse the 64 tokens into 1 vector PER IMAGE simultaneously
-        # We use dim=1 because the tokens are now in the second slot
-        # Final Shape: [Batch_Size, 1024]
-        embs = med_embeddings.mean(dim = 1)
+        # # Collapse the 64 tokens into 1 vector PER IMAGE simultaneously
+        # # We use dim=1 because the tokens are now in the second slot
+        # # Final Shape: [Batch_Size, 1024]
+        # embs = med_embeddings.mean(dim = 1)
 
-        return embs
+        # return embs
 
         # --- General models ---
-        # if isinstance(images, tuple):
-        #     images = list(images)
+        if isinstance(images, tuple):
+            images = list(images)
 
-        # # Case 1: batch tensor [B, C, H, W]
-        # if isinstance(images, torch.Tensor):
-        #     pixel_values = images.to(self.device)
+        # Case 1: batch tensor [B, C, H, W]
+        if isinstance(images, torch.Tensor):
+            pixel_values = images.to(self.device)
 
-        # # Case 2: list of PIL / numpy images
-        # else:
-        #     proc = self.processor(images = images, return_tensors = "pt")
-        #     # Ignore all non-vision fields (input_ids, etc.)
-        #     pixel_values = proc["pixel_values"].to(self.device)
+        # Case 2: list of PIL / numpy images
+        else:
+            proc = self.processor(images = images, return_tensors = "pt")
+            # Ignore all non-vision fields (input_ids, etc.)
+            pixel_values = proc["pixel_values"].to(self.device)
 
-        # # If the model exposes image-only API: `get_image_features`
-        # if hasattr(self.model, "get_image_features"):
-        #     embs = self.model.get_image_features(pixel_values = pixel_values)
+        # If the model exposes image-only API: `get_image_features`
+        if hasattr(self.model, "get_image_features"):
+            embs = self.model.get_image_features(pixel_values = pixel_values)
             
-        #     # Catch newer HF versions returning an Output object instead of a tensor
-        #     if not isinstance(embs, torch.Tensor):
-        #         # Use user-provided key if it exists
-        #         if self.output_key is not None:
-        #             return embs[self.output_key]
+            # Catch newer HF versions returning an Output object instead of a tensor
+            if not isinstance(embs, torch.Tensor):
+                # Use user-provided key if it exists
+                if self.output_key is not None:
+                    return embs[self.output_key]
                 
-        #         # Auto-detect and save the key for future batches
-        #         for key in ["image_embeds", "pooler_output"]:
-        #             if key in embs and embs[key] is not None:
-        #                 self.output_key = key
-        #                 return embs[self.output_key]
+                # Auto-detect and save the key for future batches
+                for key in ["image_embeds", "pooler_output"]:
+                    if key in embs and embs[key] is not None:
+                        self.output_key = key
+                        return embs[self.output_key]
                 
-        #         # Fallback: grab the first tensor we find
-        #         for k, v in embs.items():
-        #             if isinstance(v, torch.Tensor):
-        #                 self.output_key = k
-        #                 return embs[self.output_key]
+                # Fallback: grab the first tensor we find
+                for k, v in embs.items():
+                    if isinstance(v, torch.Tensor):
+                        self.output_key = k
+                        return embs[self.output_key]
 
-        #     return embs
+            return embs
 
-        # # Otherwise, assume it's a vision-only model where forward(pixel_values = pass) works
-        # outputs = self.model(pixel_values = pixel_values)
+        # Otherwise, assume it's a vision-only model where forward(pixel_values = pass) works
+        outputs = self.model(pixel_values = pixel_values)
 
-        # # Auto-select a tensor output field once
-        # if self.output_key is None:
-        #     for k, v in outputs.items():
-        #         if isinstance(v, torch.Tensor):
-        #             self.output_key = k
-        #             break
+        # Auto-select a tensor output field once
+        if self.output_key is None:
+            for k, v in outputs.items():
+                if isinstance(v, torch.Tensor):
+                    self.output_key = k
+                    break
 
-        # embs = outputs[self.output_key]
-        # return embs
+        embs = outputs[self.output_key]
+        return embs
 
     @property
     def embedding_dim(self):

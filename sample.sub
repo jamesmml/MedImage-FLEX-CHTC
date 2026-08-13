@@ -15,7 +15,7 @@ output = buckymodel_$(Cluster)_$(Process).out
 # File transfers
 should_transfer_files = YES
 transfer_input_files = ./testbench, ./model_configs/buckymodel/config.json, osdf:///chtc/staging/b/bucky/datasets.zip
-transfer_output_files = embeddings, results
+transfer_output_files = embeddings, results, manifests
 when_to_transfer_output = ON_EXIT_OR_EVICT
 
 # Request hardware
