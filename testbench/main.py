@@ -14,7 +14,7 @@ from time import perf_counter
 PROHIBITED_CHARS = ["\\", "/", ":", "*", "?", "\"", "<", ">", "|", "_"]
 
 # Format: (id_col, label_col)
-DATASET_COL_MAP = {"pad_ufes": ("img_id", "diagnostic"), "cbis_ddsm": ("image file path", "pathology"),
+DATASET_COL_MAP = {"pad_ufes": ("img_id", "diagnostic"), "cbis_ddsm": ("image path", "pathology"),
                    "odir": ("filename", "target"), "ham10000": ("image_id", "dx"),
                    "chexpert": ("Path", "Diagnosis")}
 GROUP_COL_MAP = {"pad_ufes": "patient_id", "cbis_ddsm": "patient_id",
