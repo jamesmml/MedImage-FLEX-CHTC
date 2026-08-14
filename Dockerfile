@@ -10,7 +10,10 @@ RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -
     rm /tmp/miniconda.sh
 
 # Add Conda to the system path
-ENV PATH="/opt/miniconda/bin:$PATH"
+ENV PATH="/opt/miniconda/bin:${PATH}"
+
+# Force the dynamic linker to check Conda-packaged binaries first 
+ENV LD_LIBRARY_PATH="/opt/miniconda/lib"
 
 # Accept Conda TOS
 ENV CONDA_PLUGINS_AUTO_ACCEPT_TOS=true
