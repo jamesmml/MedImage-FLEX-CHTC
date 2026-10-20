@@ -36,7 +36,7 @@ condor_submit sample.sub
 
 **NOTE: Any personal access tokens or keys for models must be loaded locally**
 
-## Dataset protocol
+## Dataset Protocol
 
 Dataset downloads are pinned to explicit Kaggle versions. Exact-content duplicate
 exclusions are stored in [`testbench/dataset_audits`](testbench/dataset_audits), validated against metadata and image
