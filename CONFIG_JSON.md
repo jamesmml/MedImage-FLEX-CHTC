@@ -19,9 +19,16 @@
         "shuffle": Flag for shuffling images while computing embeddings
                    (optional, default is false),
 
-        "max_samples": Maximum number of samples in the evaluation cohort;
+        "max_samples": Approximate number of evaluation samples in the cohort;
+                       complete patient/lesion groups are selected, so the actual
+                       count may be slightly above or below this target;
+                       ODIR uses patients while the other datasets use images;
                        null uses all eligible samples
-                       (optional, default is 5000)
+                       (optional, default is 5000),
+
+        "chexpert_uncertainty_policy": CheXpert uncertain-label policy. One of
+                       "finding_specific" (primary), "u_zeros", or "u_ones"
+                       (optional, default is "finding_specific")
     },
 
     "normalize_embeddings": Flag for normalizing embeddings (optional, default is true),
@@ -121,11 +128,69 @@ selected cohort are permuted with no fixed points, while image paths and labels
 remain fixed.
 
 The first run for a dataset creates a cohort manifest containing its exact sample
-IDs, grouping IDs, label signatures, and outer-fold assignments. Outer and inner
-tuning folds are grouped by patient for PAD-UFES, CBIS-DDSM, CheXpert, and ODIR,
-and by lesion for HAM10000, whose metadata does not provide patient IDs. Later
-model runs with the same configuration validate and reuse that manifest. Every
-result records the manifest path and SHA-256 checksum.
+IDs, grouping IDs, label signatures, and outer-fold assignments. Cohort selection,
+outer folds, and inner tuning folds preserve complete patient groups for PAD-UFES,
+CBIS-DDSM, CheXpert, and ODIR, and complete lesion groups for HAM10000, whose
+metadata does not provide patient IDs. Later model runs with the same configuration
+validate and reuse that manifest. Every result records the manifest path and SHA-256
+checksum, along with the requested and actual cohort sizes.
+
+MLP, KNN, and logistic-regression hyperparameters are all selected by maximizing
+macro F1 within the inner cross-validation folds. This gives each class or finding
+equal weight during model selection instead of allowing frequent labels to dominate.
+
+Every dataset result also contains two documentation blocks:
+
+- `data_audit.fingerprints` includes a traversal-independent SHA-256 of retained
+  sample IDs and a SHA-256 of canonical sample/group/processed-label records. These
+  are lightweight semantic fingerprints and deliberately do not hash image bytes.
+- `run_provenance` records a canonical SHA-256 of `config_used.json`'s content, the
+  Git commit/branch and separate tracked-change/untracked-file states when available,
+  Python and platform details, and relevant installed package versions. Tracked
+  changes mean the commit alone is not a complete description of the executed code;
+  untracked files are reported separately because they may be non-code artifacts.
+
+The ordered sample-ID hashes in `embedding_info` serve a different purpose: they
+document the exact row order of the embedding arrays and are expected to change if
+extraction order changes.
+
+`embedding_info.preprocessing` records the exact model weights, resize/normalization
+settings, and embedding output or pooling rule used by the backend. Its SHA-256 is
+also part of the embedding-cache identity, so a preprocessing change cannot silently
+reuse embeddings produced under an older protocol.
+
+Hugging Face models and their image processors are loaded from the same immutable
+40-character repository commit. The pinned revision is included in the preprocessing
+contract and therefore in both result provenance and embedding-cache identity.
+
+Each primary benchmark run writes compressed out-of-fold classification artifacts
+beneath `<run_folder>/oof/<dataset>/`. Every artifact contains the sample and group
+IDs, zero-based outer-fold assignment, targets, predictions, and class/finding
+probabilities for one adapter. Artifacts are validated for complete one-time sample
+coverage, group isolation, finite probability shapes, and exact reproduction of the
+stored fold metrics. Their SHA-256 hashes and relative paths are recorded in the
+dataset result JSON. Random and permuted baseline repetitions do not emit OOF files.
+
+Retrieval reports Hit@K and Recall@K as distinct metrics. Hit@K is the fraction of
+eligible query-label units with at least one relevant candidate in the first K
+positions. Recall@K is the mean, over those same units, of the number of relevant
+candidates in the first K positions divided by all relevant candidates remaining
+after self/same-group exclusion. The retrieval artifact stores the per-unit
+relevant-at-K counts so both metrics can be reconstructed and validated independently.
+Multilabel retrieval uses one unit per positive query-finding pair; multiclass
+retrieval uses one unit per eligible query. Result schema version 5 and retrieval
+artifact schema version 2 introduce true Recall@K, so older cached outputs must be
+regenerated before comparison or aggregation.
+
+The primary CheXpert policy maps uncertain Cardiomegaly and Consolidation labels
+to absent and uncertain Atelectasis, Edema, and Pleural Effusion labels to present.
+Unmentioned labels map to absent. The alternative `u_zeros` and `u_ones` settings
+are intended for prespecified sensitivity analyses.
+
+ODIR is evaluated as the original patient-level multilabel task. The left- and
+right-eye embeddings for each of the 3,500 labeled patients are mean-pooled and
+L2-normalized. Age and sex are recorded in the source audit but are not model
+inputs in this image-representation benchmark.
 
 ## Datasets
 - **Chest radiographs**

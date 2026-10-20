@@ -13,3 +13,4 @@ configs/
 testbench/scripts/__pycache__/
 download-datasets.sh
 execute-testbench.sh
+.cache/
