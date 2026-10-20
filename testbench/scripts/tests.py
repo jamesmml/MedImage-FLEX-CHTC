@@ -4,12 +4,18 @@ tests.py
 This file contains the functions for testing the quality of the embeddings.
 """
 
-import os
 import numpy as np
 import pandas as pd
 import optuna
 from sklearn.preprocessing import LabelEncoder, StandardScaler, Normalizer, MultiLabelBinarizer
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, precision_score, precision_recall_fscore_support
+from sklearn.metrics import (
+    accuracy_score,
+    balanced_accuracy_score,
+    f1_score,
+    roc_auc_score,
+    precision_score,
+    precision_recall_fscore_support,
+)
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import (
@@ -25,13 +31,24 @@ from collections import Counter
 from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score, silhouette_score
 
+from scripts.dataset_contracts import DATASET_CONTRACTS, get_dataset_contract
+from scripts.data_audit import ordered_ids_sha256
+from scripts.oof import OOFAccumulator, validate_oof_artifact
+from scripts.retrieval_artifacts import (
+    RETRIEVAL_ARTIFACT_SCHEMA_VERSION,
+    validate_retrieval_artifact,
+    validate_retrieval_summary,
+)
+
 # Silence Optuna's extensive logging
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
+CLASSIFICATION_TUNING_METRIC = "f1_macro"
+
 MULTILABEL_CLASS_NAMES = {
-    "chexpert": ["Cardiomegaly", "Pleural Effusion", "Edema", "Consolidation", "Atelectasis"],
-    "cbis_ddsm": ["mass_BENIGN", "mass_MALIGNANT", "mass_BENIGN_WITHOUT_CALLBACK",
-                  "calcification_BENIGN", "calcification_MALIGNANT", "calcification_BENIGN_WITHOUT_CALLBACK"]
+    name: list(contract.label_names)
+    for name, contract in DATASET_CONTRACTS.items()
+    if contract.label_type == "multilabel"
 }
 
 def encode_labels(labels, dataset_name = None):
@@ -75,8 +92,21 @@ def encode_labels(labels, dataset_name = None):
 
     return y, classes, False
 
+def _embedding_sample_ids(dataset_name, image_paths, sample_ids=None):
+    if sample_ids is None:
+        contract = get_dataset_contract(dataset_name)
+        sample_ids = [contract.sample_id_from_path(path) for path in image_paths]
+    else:
+        sample_ids = [str(sample_id) for sample_id in sample_ids]
+    if len(sample_ids) != len(image_paths):
+        raise ValueError("Sample IDs and sample references have different lengths.")
+    if len(set(sample_ids)) != len(sample_ids):
+        raise ValueError("Embedding sample IDs must be unique.")
+    return sample_ids
+
+
 def prepare_data_multilabel(dataset_name, embeddings, metadata_df, image_paths, id_col, label_col,
-                            return_sample_ids = False):
+                            return_sample_ids = False, sample_ids = None):
     """
     Prepares the data for adapters. Allows for multilabel data to be labeled appropriately.
     Embeddings are ordered to be "paired" up with their associated image and target.
@@ -97,15 +127,10 @@ def prepare_data_multilabel(dataset_name, embeddings, metadata_df, image_paths, 
         classes : The target classes in the dataset
         is_multilabel : Boolean flag for multilabel data
     """
-    # Prepare image column for embedding DataFrame
-    if dataset_name == "chexpert":
-        image_names = [os.sep.join(path.split(os.sep)[-3:]) for path in image_paths]
-    elif dataset_name == "cbis_ddsm":
-        image_names = ["/".join(path.split(os.sep)[-2:]) for path in image_paths]
-    else:
-        image_names = [os.path.basename(path) for path in image_paths]
-
     emb = np.asarray(embeddings, dtype = np.float32)
+    image_names = _embedding_sample_ids(dataset_name, image_paths, sample_ids)
+    if emb.ndim != 2 or len(emb) != len(image_names):
+        raise ValueError("Embedding rows must match the explicit sample IDs.")
     emb_df = pd.DataFrame(emb)
     emb_df[id_col] = np.asarray(image_names)
 
@@ -126,7 +151,8 @@ def prepare_data_multilabel(dataset_name, embeddings, metadata_df, image_paths, 
 
     return X, y, classes, is_multilabel
 
-def prepare_data_multiclass(dataset_name, embeddings, metadata_df, image_paths, id_col, label_col):
+def prepare_data_multiclass(dataset_name, embeddings, metadata_df, image_paths, id_col, label_col,
+                            sample_ids = None):
     """
     Prepares the data for adapters. Treats multilabel data as multiclass data.
     Embeddings are ordered to be "paired" up with their associated image and target.
@@ -146,15 +172,10 @@ def prepare_data_multiclass(dataset_name, embeddings, metadata_df, image_paths, 
         y : The target diagnosis(es)
         classes : The target classes in the dataset
     """
-    # Prepare image column for embedding DataFrame
-    if dataset_name == "chexpert":
-        image_names = [os.sep.join(path.split(os.sep)[-3:]) for path in image_paths]
-    elif dataset_name == "cbis_ddsm":
-        image_names = ["/".join(path.split(os.sep)[-2:]) for path in image_paths]
-    else:
-        image_names = [os.path.basename(path) for path in image_paths]
-
     emb = np.asarray(embeddings, dtype = np.float32)
+    image_names = _embedding_sample_ids(dataset_name, image_paths, sample_ids)
+    if emb.ndim != 2 or len(emb) != len(image_names):
+        raise ValueError("Embedding rows must match the explicit sample IDs.")
     emb_df = pd.DataFrame(emb)
     emb_df[id_col] = np.asarray(image_names)
 
@@ -200,6 +221,8 @@ def _inner_cv_splitter(is_multilabel, y, n_splits, random_state):
 def _group_ids_for_samples(metadata_df, id_col, group_col, sample_ids):
     if group_col is None:
         return None
+    if group_col == id_col:
+        return np.asarray(sample_ids, dtype=str)
 
     identifiers = metadata_df[[id_col, group_col]].dropna().copy()
     identifiers[id_col] = identifiers[id_col].astype(str)
@@ -262,6 +285,10 @@ def _split_iter(cv, X, y, is_multilabel):
 def _outer_split_iter(X, y, is_multilabel, n_splits, random_state,
                       sample_ids, outer_folds, group_ids=None):
     if outer_folds is None:
+        if group_ids is not None:
+            raise ValueError(
+                "A stored outer-fold manifest is required for grouped evaluation."
+            )
         cv = _cv_splitter(is_multilabel, n_splits, random_state)
         return _split_iter(cv, X, y, is_multilabel)
 
@@ -298,6 +325,7 @@ def _extract_positive_proba(proba):
     return proba
 
 def _dataset_info(dataset_name, y, classes, label_type):
+    contract = get_dataset_contract(dataset_name)
     if label_type == "multilabel":
         counts = np.asarray(y).sum(axis = 0)
     else:
@@ -309,7 +337,11 @@ def _dataset_info(dataset_name, y, classes, label_type):
         "n_classes": int(len(classes)),
         "classes": [str(cls) for cls in classes],
         "class_counts": {str(cls): int(counts[idx]) for idx, cls in enumerate(classes)},
-        "label_type": label_type
+        "label_type": label_type,
+        "evaluation_unit": contract.evaluation_unit,
+        "accuracy_metric": (
+            "exact_match_accuracy" if label_type == "multilabel" else "accuracy"
+        ),
     }
 
 def _per_class_metrics(y_true, y_pred, classes, is_multilabel):
@@ -335,33 +367,67 @@ def _per_class_metrics(y_true, y_pred, classes, is_multilabel):
         for idx, cls in enumerate(classes)
     }
 
-def _evaluate_classifier(pipe, X_test, y_test, is_multilabel, y_pred = None):
-    if y_pred is None:
-        y_pred = pipe.predict(X_test)
+def _classification_scores(y_true, y_pred, proba, is_multilabel):
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    proba = np.asarray(proba, dtype=float)
 
     scores = {
-        "accuracy": accuracy_score(y_test, y_pred),
-        "f1_weighted": f1_score(y_test, y_pred, average = "weighted", zero_division = 0),
-        "precision_weighted": precision_score(y_test, y_pred, average = "weighted", zero_division = 0),
+        "f1_macro": f1_score(y_true, y_pred, average = "macro", zero_division = 0),
+        "f1_weighted": f1_score(y_true, y_pred, average = "weighted", zero_division = 0),
+        "precision_weighted": precision_score(
+            y_true, y_pred, average = "weighted", zero_division = 0
+        ),
     }
-
-    proba = _extract_positive_proba(pipe.predict_proba(X_test))
-
     if is_multilabel:
-        # Only calculate ROC-AUC for columns that contain both 0s and 1s in y_test
-        valid_cols = [i for i in range(y_test.shape[1]) if len(np.unique(y_test[:, i])) > 1]
-        
-        if len(valid_cols) > 0:
-            scores["roc_auc"] = roc_auc_score(y_test[:, valid_cols], proba[:, valid_cols], average = "macro")
-        else:
-            scores["roc_auc"] = np.nan
-            
-    elif proba.shape[1] == 2:
-        scores["roc_auc"] = roc_auc_score(y_test, proba[:, 1])
+        scores["exact_match_accuracy"] = accuracy_score(y_true, y_pred)
+        valid_cols = [
+            i for i in range(y_true.shape[1])
+            if len(np.unique(y_true[:, i])) > 1
+        ]
+        scores["roc_auc"] = (
+            roc_auc_score(
+                y_true[:, valid_cols], proba[:, valid_cols], average = "macro"
+            )
+            if valid_cols else np.nan
+        )
     else:
-        scores["roc_auc"] = roc_auc_score(y_test, proba, multi_class = "ovr", average = "macro")
-
+        scores["accuracy"] = accuracy_score(y_true, y_pred)
+        scores["balanced_accuracy"] = balanced_accuracy_score(y_true, y_pred)
+        scores["roc_auc"] = (
+            roc_auc_score(y_true, proba[:, 1])
+            if proba.shape[1] == 2 else
+            roc_auc_score(y_true, proba, multi_class = "ovr", average = "macro")
+        )
     return scores
+
+
+def _evaluate_classifier(pipe, X_test, y_test, is_multilabel, y_pred = None,
+                         return_proba = False):
+    if y_pred is None:
+        y_pred = pipe.predict(X_test)
+    proba = _extract_positive_proba(pipe.predict_proba(X_test))
+    scores = _classification_scores(y_test, y_pred, proba, is_multilabel)
+    return (scores, proba) if return_proba else scores
+
+
+def _classification_metric_names(is_multilabel):
+    if is_multilabel:
+        return (
+            "exact_match_accuracy",
+            "f1_macro",
+            "f1_weighted",
+            "precision_weighted",
+            "roc_auc",
+        )
+    return (
+        "accuracy",
+        "balanced_accuracy",
+        "f1_macro",
+        "f1_weighted",
+        "precision_weighted",
+        "roc_auc",
+    )
 
 def _fold_summary(fold_idx, scores):
     fold_result = {"fold": int(fold_idx)}
@@ -379,9 +445,37 @@ def _most_common_params(params_by_fold):
     return dict(counts.most_common(1)[0][0])
 
 
+def _validate_oof_metric_consistency(artifact, fold_score_rows, is_multilabel):
+    """Prove that stored fold metrics are reproducible from the OOF arrays."""
+    validate_oof_artifact(artifact)
+    folds = np.asarray(artifact["outer_folds"], dtype=int)
+    observed_folds = sorted(np.unique(folds).tolist())
+    if len(fold_score_rows) != len(observed_folds):
+        raise ValueError("OOF folds do not match the stored fold summaries.")
+
+    for fold_index, fold_row in zip(observed_folds, fold_score_rows):
+        if int(fold_row["fold"]) != fold_index + 1:
+            raise ValueError("OOF fold numbering does not match fold summaries.")
+        mask = folds == fold_index
+        recomputed = _classification_scores(
+            np.asarray(artifact["y_true"])[mask],
+            np.asarray(artifact["y_pred"])[mask],
+            np.asarray(artifact["y_score"])[mask],
+            is_multilabel,
+        )
+        for metric, value in recomputed.items():
+            stored = float(fold_row[metric])
+            if not np.isclose(stored, value, rtol=1e-12, atol=1e-12, equal_nan=True):
+                raise ValueError(
+                    f"OOF-derived {metric} does not match fold {fold_index + 1}."
+                )
+    return True
+
+
 def MLP_cv(dataset_name, embeddings, metadata_df, image_paths, id_col,
            label_col, n_splits = 5, random_state = 42, n_trials = 20,
-           outer_folds = None, group_col = None):
+           outer_folds = None, group_col = None, sample_ids = None,
+           return_oof = False):
     """
     Tests the embeddings on an MLP adapter.
 
@@ -401,7 +495,7 @@ def MLP_cv(dataset_name, embeddings, metadata_df, image_paths, id_col,
     """
     X, y, classes, is_multilabel, sample_ids = prepare_data_multilabel(
         dataset_name, embeddings, metadata_df, image_paths, id_col, label_col,
-        return_sample_ids = True
+        return_sample_ids = True, sample_ids = sample_ids
     )
     group_ids = _group_ids_for_samples(
         metadata_df, id_col, group_col, sample_ids
@@ -411,8 +505,9 @@ def MLP_cv(dataset_name, embeddings, metadata_df, image_paths, id_col,
         X, y, is_multilabel, n_splits, random_state, sample_ids, outer_folds,
         group_ids
     )
-    scoring_auc = "roc_auc" if is_multilabel or len(classes) == 2 else "roc_auc_ovr"
-
+    oof = OOFAccumulator(
+        dataset_name, "mlp", sample_ids, group_ids, y, classes, is_multilabel
+    )
     print(f"--- Optimizing MLP with Optuna ({n_trials} trials) ---")
 
     def build_pipe(params, max_iter):
@@ -431,13 +526,11 @@ def MLP_cv(dataset_name, embeddings, metadata_df, image_paths, id_col,
 
         return Pipeline([("scaler", StandardScaler()), ("mlp", clf)])
 
-    fold_scores = {"accuracy": [], "f1_weighted": [], "precision_weighted": [], "roc_auc": []}
+    metric_names = _classification_metric_names(is_multilabel)
+    fold_scores = {metric: [] for metric in metric_names}
     fold_score_rows = []
     best_params_by_fold = []
     inner_folds_by_fold = []
-    y_true_parts = []
-    y_pred_parts = []
-
     optuna_seeds = []
     for fold_idx, (train_idx, test_idx) in enumerate(outer_splits, start = 1):
         X_train, X_test = X[train_idx], X[test_idx]
@@ -464,7 +557,7 @@ def MLP_cv(dataset_name, embeddings, metadata_df, image_paths, id_col,
             scores = cross_val_score(
                 pipeline, X_train, y_train,
                 cv = inner_cv,
-                scoring = scoring_auc,
+                scoring = CLASSIFICATION_TUNING_METRIC,
                 n_jobs = -1
             )
             return scores.mean()
@@ -481,25 +574,30 @@ def MLP_cv(dataset_name, embeddings, metadata_df, image_paths, id_col,
         final_pipe = build_pipe(study.best_params, max_iter = 500)
         final_pipe.fit(X_train, y_train)
         y_pred = final_pipe.predict(X_test)
-        scores = _evaluate_classifier(final_pipe, X_test, y_test, is_multilabel, y_pred = y_pred)
+        scores, y_score = _evaluate_classifier(
+            final_pipe, X_test, y_test, is_multilabel,
+            y_pred = y_pred, return_proba = True
+        )
+        oof.record(test_idx, fold_idx - 1, y_test, y_pred, y_score)
 
         for metric, score in scores.items():
             fold_scores[metric].append(float(score))
 
         fold_score_rows.append(_fold_summary(fold_idx, scores))
-        y_true_parts.append(y_test)
-        y_pred_parts.append(y_pred)
-
         print(f"  Fold {fold_idx}/{n_splits} best params: {study.best_params}")
 
+    oof_artifact = oof.finalize()
+    _validate_oof_metric_consistency(
+        oof_artifact, fold_score_rows, is_multilabel
+    )
     summary = _summarize_fold_scores(fold_scores)
     summary["classes"] = classes
     summary["best_params"] = _most_common_params(best_params_by_fold)
     summary["best_params_by_fold"] = best_params_by_fold
     summary["fold_scores"] = fold_score_rows
     summary["per_class"] = _per_class_metrics(
-        np.concatenate(y_true_parts),
-        np.concatenate(y_pred_parts),
+        oof_artifact["y_true"],
+        oof_artifact["y_pred"],
         classes,
         is_multilabel
     )
@@ -515,7 +613,7 @@ def MLP_cv(dataset_name, embeddings, metadata_df, image_paths, id_col,
             "stratified_group_kfold" if group_col is not None else "sample_level"
         ),
         "inner_fold_unit": group_col if group_col is not None else "sample_id",
-        "tuning_metric": scoring_auc,
+        "tuning_metric": CLASSIFICATION_TUNING_METRIC,
         "n_trials": int(n_trials)
     }
 
@@ -527,15 +625,17 @@ def MLP_cv(dataset_name, embeddings, metadata_df, image_paths, id_col,
     )
 
     print(f"Nested CV {n_splits}-fold results (mean ± std):")
-    for k in ["accuracy", "f1_weighted", "precision_weighted", "roc_auc"]:
+    for k in metric_names:
         m, s = summary[k]
         print(f"  {k:18s}: {m:.4f} ± {s:.4f}")
 
+    if return_oof:
+        return summary, dataset_info, oof_artifact
     return summary, dataset_info
 
 def KNN_cv(dataset_name, embeddings, metadata_df, image_paths, id_col, label_col,
            n_splits = 5, random_state = 42, n_trials = 15, outer_folds = None,
-           group_col = None):
+           group_col = None, sample_ids = None, return_oof = False):
     """
     Tests the embeddings on a KNN adapter.
 
@@ -555,7 +655,7 @@ def KNN_cv(dataset_name, embeddings, metadata_df, image_paths, id_col, label_col
     """
     X, y, classes, is_multilabel, sample_ids = prepare_data_multilabel(
         dataset_name, embeddings, metadata_df, image_paths, id_col, label_col,
-        return_sample_ids = True
+        return_sample_ids = True, sample_ids = sample_ids
     )
     group_ids = _group_ids_for_samples(
         metadata_df, id_col, group_col, sample_ids
@@ -576,13 +676,14 @@ def KNN_cv(dataset_name, embeddings, metadata_df, image_paths, id_col, label_col
         X, y, is_multilabel, n_splits, random_state, sample_ids, outer_folds,
         group_ids
     )
-    fold_scores = {"accuracy": [], "f1_weighted": [], "precision_weighted": [], "roc_auc": []}
+    oof = OOFAccumulator(
+        dataset_name, "knn", sample_ids, group_ids, y, classes, is_multilabel
+    )
+    metric_names = _classification_metric_names(is_multilabel)
+    fold_scores = {metric: [] for metric in metric_names}
     fold_score_rows = []
     best_params_by_fold = []
     inner_folds_by_fold = []
-    y_true_parts = []
-    y_pred_parts = []
-
     optuna_seeds = []
     for fold_idx, (train_idx, test_idx) in enumerate(outer_splits, start = 1):
         X_train, X_test = X[train_idx], X[test_idx]
@@ -603,11 +704,11 @@ def KNN_cv(dataset_name, embeddings, metadata_df, image_paths, id_col, label_col
                 "metric": trial.suggest_categorical("metric", ["euclidean", "cosine", "manhattan"])
             }
 
-            # Use F1 weighted for tuning KNN (handling class imbalance better than accuracy)
+            # Macro F1 prevents majority findings/classes from dominating selection.
             score = cross_val_score(
                 build_pipe(params), X_train, y_train,
                 cv = inner_cv,
-                scoring = "f1_weighted",
+                scoring = CLASSIFICATION_TUNING_METRIC,
                 n_jobs = -1
             ).mean()
             return score
@@ -624,36 +725,35 @@ def KNN_cv(dataset_name, embeddings, metadata_df, image_paths, id_col, label_col
         final_pipe = build_pipe(study.best_params)
         final_pipe.fit(X_train, y_train)
         y_pred = final_pipe.predict(X_test)
-        scores = _evaluate_classifier(final_pipe, X_test, y_test, is_multilabel, y_pred = y_pred)
+        scores, y_score = _evaluate_classifier(
+            final_pipe, X_test, y_test, is_multilabel,
+            y_pred = y_pred, return_proba = True
+        )
+        oof.record(test_idx, fold_idx - 1, y_test, y_pred, y_score)
 
         for metric, score in scores.items():
             fold_scores[metric].append(float(score))
 
         fold_score_rows.append(_fold_summary(fold_idx, scores))
-        y_true_parts.append(y_test)
-        y_pred_parts.append(y_pred)
-
         print(f"  Fold {fold_idx}/{n_splits} best params: {study.best_params}")
 
+    oof_artifact = oof.finalize()
+    _validate_oof_metric_consistency(
+        oof_artifact, fold_score_rows, is_multilabel
+    )
     score_summary = _summarize_fold_scores(fold_scores)
     best_params = _most_common_params(best_params_by_fold)
 
-    # JSON compatible
-    summary = {
+    summary = dict(score_summary)
+    summary.update({
         "best_k": best_params["n_neighbors"],
-        "best_scores": {
-            "accuracy": score_summary["accuracy"][0],
-            "f1_weighted": score_summary["f1_weighted"][0],
-            "precision_weighted": score_summary["precision_weighted"],
-            "roc_auc": score_summary["roc_auc"]
-        },
         "classes": classes,
         "best_params": best_params,
         "best_params_by_fold": best_params_by_fold,
         "fold_scores": fold_score_rows,
         "per_class": _per_class_metrics(
-            np.concatenate(y_true_parts),
-            np.concatenate(y_pred_parts),
+            oof_artifact["y_true"],
+            oof_artifact["y_pred"],
             classes,
             is_multilabel
         ),
@@ -669,23 +769,24 @@ def KNN_cv(dataset_name, embeddings, metadata_df, image_paths, id_col, label_col
                 "stratified_group_kfold" if group_col is not None else "sample_level"
             ),
             "inner_fold_unit": group_col if group_col is not None else "sample_id",
-            "tuning_metric": "f1_weighted",
+            "tuning_metric": CLASSIFICATION_TUNING_METRIC,
             "n_trials": int(n_trials)
-        }
-    }
+        },
+    })
 
     print(f"KNN nested CV (n_splits={n_splits}) — most common best k = {summary['best_k']}")
-    for k, v in summary["best_scores"].items():
-        if isinstance(v, list):
-            continue
-        else:
-            print(f"  {k:18s}: {v:.4f}")
+    for metric in metric_names:
+        mean, std = summary[metric]
+        print(f"  {metric:18s}: {mean:.4f} ± {std:.4f}")
 
+    if return_oof:
+        return summary, oof_artifact
     return summary
 
 def logistic_regression_cv(dataset_name, embeddings, metadata_df, image_paths, id_col, label_col,
                            n_splits = 5, random_state = 42, n_trials = 15,
-                           outer_folds = None, group_col = None):
+                           outer_folds = None, group_col = None, sample_ids = None,
+                           return_oof = False):
     """
     Tests the embeddings on a LR adapter.
 
@@ -705,7 +806,7 @@ def logistic_regression_cv(dataset_name, embeddings, metadata_df, image_paths, i
     """
     X, y, classes, is_multilabel, sample_ids = prepare_data_multilabel(
         dataset_name, embeddings, metadata_df, image_paths, id_col, label_col,
-        return_sample_ids = True
+        return_sample_ids = True, sample_ids = sample_ids
     )
     group_ids = _group_ids_for_samples(
         metadata_df, id_col, group_col, sample_ids
@@ -715,8 +816,10 @@ def logistic_regression_cv(dataset_name, embeddings, metadata_df, image_paths, i
         X, y, is_multilabel, n_splits, random_state, sample_ids, outer_folds,
         group_ids
     )
-    scoring_auc = "roc_auc" if is_multilabel or len(classes) == 2 else "roc_auc_ovr"
-
+    oof = OOFAccumulator(
+        dataset_name, "logistic_regression", sample_ids, group_ids,
+        y, classes, is_multilabel
+    )
     print(f"--- Optimizing Logistic Regression with Optuna ({n_trials} trials) ---")
 
     def build_pipe(params, n_rows, max_iter):
@@ -740,13 +843,11 @@ def logistic_regression_cv(dataset_name, embeddings, metadata_df, image_paths, i
 
         return Pipeline([("std", StandardScaler()), ("clf", clf)])
 
-    fold_scores = {"accuracy": [], "f1_weighted": [], "precision_weighted": [], "roc_auc": []}
+    metric_names = _classification_metric_names(is_multilabel)
+    fold_scores = {metric: [] for metric in metric_names}
     fold_score_rows = []
     best_params_by_fold = []
     inner_folds_by_fold = []
-    y_true_parts = []
-    y_pred_parts = []
-
     optuna_seeds = []
     for fold_idx, (train_idx, test_idx) in enumerate(outer_splits, start = 1):
         X_train, X_test = X[train_idx], X[test_idx]
@@ -769,7 +870,7 @@ def logistic_regression_cv(dataset_name, embeddings, metadata_df, image_paths, i
                 X_train,
                 y_train,
                 cv = inner_cv,
-                scoring = scoring_auc,
+                scoring = CLASSIFICATION_TUNING_METRIC,
                 n_jobs = -1
             ).mean()
 
@@ -785,25 +886,30 @@ def logistic_regression_cv(dataset_name, embeddings, metadata_df, image_paths, i
         final_pipe = build_pipe(study.best_params, len(X_train), max_iter = 3000)
         final_pipe.fit(X_train, y_train)
         y_pred = final_pipe.predict(X_test)
-        scores = _evaluate_classifier(final_pipe, X_test, y_test, is_multilabel, y_pred = y_pred)
+        scores, y_score = _evaluate_classifier(
+            final_pipe, X_test, y_test, is_multilabel,
+            y_pred = y_pred, return_proba = True
+        )
+        oof.record(test_idx, fold_idx - 1, y_test, y_pred, y_score)
 
         for metric, score in scores.items():
             fold_scores[metric].append(float(score))
 
         fold_score_rows.append(_fold_summary(fold_idx, scores))
-        y_true_parts.append(y_test)
-        y_pred_parts.append(y_pred)
-
         print(f"  Fold {fold_idx}/{n_splits} best params: {study.best_params}")
 
+    oof_artifact = oof.finalize()
+    _validate_oof_metric_consistency(
+        oof_artifact, fold_score_rows, is_multilabel
+    )
     summary = _summarize_fold_scores(fold_scores)
     summary["classes"] = classes
     summary["best_params"] = _most_common_params(best_params_by_fold)
     summary["best_params_by_fold"] = best_params_by_fold
     summary["fold_scores"] = fold_score_rows
     summary["per_class"] = _per_class_metrics(
-        np.concatenate(y_true_parts),
-        np.concatenate(y_pred_parts),
+        oof_artifact["y_true"],
+        oof_artifact["y_pred"],
         classes,
         is_multilabel
     )
@@ -819,27 +925,30 @@ def logistic_regression_cv(dataset_name, embeddings, metadata_df, image_paths, i
             "stratified_group_kfold" if group_col is not None else "sample_level"
         ),
         "inner_fold_unit": group_col if group_col is not None else "sample_id",
-        "tuning_metric": scoring_auc,
+        "tuning_metric": CLASSIFICATION_TUNING_METRIC,
         "n_trials": int(n_trials)
     }
 
     # Print out the results
     print(f"Logistic Regression Nested CV Results (n_splits={n_splits}):")
-    for metric in ["accuracy", "f1_weighted", "precision_weighted", "roc_auc"]:
+    for metric in metric_names:
         mean, std = summary[metric]
         print(f"  {metric:18s}: {mean:.4f} ± {std:.4f}")
 
+    if return_oof:
+        return summary, oof_artifact
     return summary
 
 def retrieval_eval(dataset_name, embeddings, metadata_df, image_paths, id_col, label_col,
                    ks = (1, 5, 10), normalize = True, per_class = False,
-                   bootstrap = True, n_bootstrap = 1000, ci = 95, random_state = 42):
+                   bootstrap = True, n_bootstrap = 1000, ci = 95, random_state = 42,
+                   group_col = None, sample_ids = None, return_artifact = False):
     """
-    All-vs-all retrieval on embeddings using cosine similarity (via L2-normalization).
-    Returns Recall@K and mAP. Queries from singleton classes are skipped for metrics.
+    Cross-group retrieval using exact-class or per-finding relevance.
 
-    For Multilabel data, this test treats unique label vectors as distinct "classes"
-    for the purpose of determining "Same Class" vs "Different Class" in retrieval.
+    Multiclass candidates are relevant when they share the query class. Multilabel
+    retrieval evaluates each positive query finding separately. The query itself and,
+    when available, every sample from the same patient/lesion group are excluded.
 
     Args:
         dataset_name : The name of the given dataset
@@ -848,25 +957,43 @@ def retrieval_eval(dataset_name, embeddings, metadata_df, image_paths, id_col, l
         image_paths : The local paths of all images
         id_col : The name of the column that identifies each unique image
         label_col : The name of the column that contains the diagnosis for each image
-        ks : Iterable of ints, K values for Recall@K
+        ks : Iterable of ints, K values for Hit@K and Recall@K
         normalize : Boolean flag to L2-normalize embeddings
-        per_class : Boolean flag to return per-class Recall@K
+        per_class : Boolean flag to return per-class Hit@K and Recall@K
         bootstrap : Boolean flag to return bootstrap confidence intervals
         n_bootstrap : Number of bootstrap resamples over evaluated queries
         ci : Confidence interval width
         random_state : Seed used for bootstrap resampling
+        group_col : Metadata column identifying patient/lesion groups
 
     Returns:
-        results : JSON-compatible summary of the recall test
+        results : JSON-compatible retrieval summary; when return_artifact is True,
+            returns (results, artifact)
     """
-    X, y, classes = prepare_data_multiclass(dataset_name, embeddings, metadata_df, image_paths,
-            id_col, label_col)
+    X, y, classes, is_multilabel, sample_ids = prepare_data_multilabel(
+        dataset_name, embeddings, metadata_df, image_paths, id_col, label_col,
+        return_sample_ids = True, sample_ids = sample_ids
+    )
+    group_ids = _group_ids_for_samples(
+        metadata_df, id_col, group_col, sample_ids
+    )
 
-    message = ""
-    for idx, k in enumerate(ks):
-        message += f"{k}, " if idx != len(ks) - 1 else f"and {k}"
+    ks = tuple(int(k) for k in ks)
+    if not ks or any(k < 1 for k in ks):
+        raise ValueError("Retrieval K values must be positive integers.")
+    if len(set(ks)) != len(ks):
+        raise ValueError("Retrieval K values must be unique.")
+    if bootstrap and n_bootstrap < 1:
+        raise ValueError("n_bootstrap must be at least 1 when bootstrap is enabled.")
+    if not 0 < ci < 100:
+        raise ValueError("ci must be between 0 and 100.")
 
-    print(f"--- Retrieval evaluation with Recall@{message} ---")
+    if len(ks) == 1:
+        message = str(ks[0])
+    else:
+        message = f"{', '.join(str(k) for k in ks[:-1])}, and {ks[-1]}"
+
+    print(f"--- Retrieval evaluation with Hit/Recall@{message} ---")
 
     # Normalize to make cosine == dot
     if normalize:
@@ -874,129 +1001,350 @@ def retrieval_eval(dataset_name, embeddings, metadata_df, image_paths, id_col, l
 
     N = X.shape[0]
 
-    # Cosine similarity and ranking
-    S = X @ X.T                            # cosine similarity
-    np.fill_diagonal(S, -np.inf)           # don't retrieve yourself
-    ranks = np.argsort(-S, axis = 1)         # highest sim first
+    protocol = {
+        "type": (
+            "group_excluded_all_vs_all_retrieval"
+            if group_ids is not None else "self_excluded_all_vs_all_retrieval"
+        ),
+        "ks": [int(k) for k in ks],
+        "similarity": "cosine" if normalize else "dot_product",
+        "normalized": normalize,
+        "relevance": "per_finding" if is_multilabel else "exact_class",
+        "aggregation": (
+            "micro_over_query_finding_pairs" if is_multilabel else "queries"
+        ),
+        "candidate_exclusion": (
+            "self_and_same_group" if group_ids is not None else "self"
+        ),
+        "group_column": group_col,
+        "bootstrap": bootstrap,
+        "bootstrap_unit": group_col if group_ids is not None else "query",
+        "n_bootstrap": int(n_bootstrap),
+        "ci": int(ci),
+        "random_state": int(random_state),
+        "tuned": False,
+    }
 
-    # Mask out singleton classes
-    counts = Counter(y.tolist())
-    valid = np.array([counts[c] > 1 for c in y])  # queries with at least 1 other same-class item
-    idx_valid = np.where(valid)[0]
-    n_eval = int(valid.sum())
+    similarities = X @ X.T
 
-    if n_eval == 0:
+    def ranked_candidates(query_index):
+        candidate_mask = np.ones(N, dtype=bool)
+        candidate_mask[query_index] = False
+        if group_ids is not None:
+            candidate_mask &= group_ids != group_ids[query_index]
+        candidates = np.flatnonzero(candidate_mask)
+        order = np.argsort(-similarities[query_index, candidates], kind="stable")
+        return candidates[order]
+
+    def metrics_for_relevance(relevance):
+        hits = np.flatnonzero(relevance)
+        precision_at_hits = np.cumsum(relevance)[hits] / (hits + 1)
+        n_relevant = int(len(hits))
+        n_relevant_at_k = {
+            int(k): int(np.sum(relevance[:k])) for k in ks
+        }
         return {
-            "n_total": N,
-            "n_eval": 0,
-            "recall_at_k": {int(k): np.nan for k in ks},
-            "map": np.nan,
-            "evaluation_protocol": {
-                "type": "all_vs_all_retrieval",
-                "ks": [int(k) for k in ks],
-                "similarity": "cosine",
-                "normalized": normalize,
-                "bootstrap": bootstrap,
-                "n_bootstrap": int(n_bootstrap),
-                "ci": int(ci),
-                "random_state": int(random_state),
-                "tuned": False
+            "average_precision": float(np.mean(precision_at_hits)),
+            "first_relevant_rank": int(hits[0] + 1),
+            "n_relevant_at_k": n_relevant_at_k,
+            "hit_at_k": {
+                int(k): n_relevant_at_k[int(k)] > 0 for k in ks
             },
-            "protocol": {"similarity": "cosine", "normalized": normalize, "tuned": False},
-            "note": "No classes have more than one sample; retrieval undefined."
+            "recall_at_k": {
+                int(k): n_relevant_at_k[int(k)] / n_relevant for k in ks
+            },
         }
 
-    # Metrics helpers
-    def recall_at_k_for_query(i, K):
-        """
-        Tests if the top K neighbors share the same label as the query.
+    all_units = []
+    for query_index in range(N):
+        candidates = ranked_candidates(query_index)
+        if is_multilabel:
+            positive_findings = np.flatnonzero(y[query_index] == 1)
+            for finding_index in positive_findings:
+                relevance = y[candidates, finding_index] == 1
+                unit = {
+                    "query_index": int(query_index),
+                    "group_id": (
+                        str(group_ids[query_index])
+                        if group_ids is not None else str(sample_ids[query_index])
+                    ),
+                    "label_index": int(finding_index),
+                    "n_candidates": int(len(candidates)),
+                    "n_relevant": int(np.sum(relevance)),
+                }
+                if np.any(relevance):
+                    unit.update({"eligible": True, "exclusion_reason": ""})
+                    unit.update(metrics_for_relevance(relevance))
+                else:
+                    unit.update({
+                        "eligible": False,
+                        "exclusion_reason": (
+                            "no_candidates" if len(candidates) == 0
+                            else "no_relevant_candidate"
+                        ),
+                        "average_precision": np.nan,
+                        "first_relevant_rank": -1,
+                        "n_relevant_at_k": {int(k): 0 for k in ks},
+                        "hit_at_k": {int(k): False for k in ks},
+                        "recall_at_k": {int(k): np.nan for k in ks},
+                    })
+                all_units.append(unit)
+        else:
+            relevance = y[candidates] == y[query_index]
+            unit = {
+                "query_index": int(query_index),
+                "group_id": (
+                    str(group_ids[query_index])
+                    if group_ids is not None else str(sample_ids[query_index])
+                ),
+                "label_index": int(y[query_index]),
+                "n_candidates": int(len(candidates)),
+                "n_relevant": int(np.sum(relevance)),
+            }
+            if np.any(relevance):
+                unit.update({"eligible": True, "exclusion_reason": ""})
+                unit.update(metrics_for_relevance(relevance))
+            else:
+                unit.update({
+                    "eligible": False,
+                    "exclusion_reason": (
+                        "no_candidates" if len(candidates) == 0
+                        else "no_relevant_candidate"
+                    ),
+                    "average_precision": np.nan,
+                    "first_relevant_rank": -1,
+                    "n_relevant_at_k": {int(k): 0 for k in ks},
+                    "hit_at_k": {int(k): False for k in ks},
+                    "recall_at_k": {int(k): np.nan for k in ks},
+                })
+            all_units.append(unit)
 
-        Args:
-            i : The index of the query sample in the dataset
-            K : The number of neighbors to consider
-        Returns:
-            True if any of the K neighbors share the same label as the query
-        """
-        # true if any of top-K neighbors share the label
-        topk = ranks[i, :K]
-        return np.any(y[topk] == y[i])
+    evaluation_units = [unit for unit in all_units if unit["eligible"]]
 
-    def average_precision_for_query(i):
-        """
-        Computes the average precision for a single query.
+    valid_query_indices = {unit["query_index"] for unit in evaluation_units}
+    n_eval = len(valid_query_indices)
 
-        Args:
-            i : The index of the query sample in the dataset
-        
-        Returns:
-            The average precision for the query
-        """
-        rel = (y[ranks[i]] == y[i])   # boolean vector over all candidates
-        if not np.any(rel):
-            return np.nan  # shouldn't happen for valid queries, but safe-guard
-        # precision at each rank where rel is True
-        hits = np.flatnonzero(rel)        # positions where we hit the class
-        precisions = []
-        for r in hits:
-            # ranks are 0-indexed; +1 is the rank position
-            top_r = ranks[i, :r + 1]
-            precisions.append(np.mean(y[top_r] == y[i]))
-        # AP = mean of precisions at relevant ranks
-        return float(np.mean(precisions))
+    def aggregate_units(units):
+        return {
+            "hit_at_k": {
+                int(k): float(np.mean([
+                    unit["hit_at_k"][int(k)] for unit in units
+                ]))
+                for k in ks
+            },
+            "recall_at_k": {
+                int(k): float(np.mean([
+                    unit["recall_at_k"][int(k)] for unit in units
+                ]))
+                for k in ks
+            },
+            "map": float(np.mean([
+                unit["average_precision"] for unit in units
+            ])),
+        }
 
-    # Compute query-level metrics, then aggregate.
-    per_query = []
-    for i in idx_valid:
-        recall_values = {int(K): bool(recall_at_k_for_query(i, K)) for K in ks}
-        per_query.append({
-            "query_index": int(i),
-            "class": str(classes[y[i]]),
-            "average_precision": average_precision_for_query(i),
-            "recall_at_k": recall_values
-        })
+    def build_artifact():
+        query_indices = np.asarray(
+            [unit["query_index"] for unit in all_units], dtype=np.int64
+        )
+        artifact = {
+            "schema_version": np.asarray(
+                RETRIEVAL_ARTIFACT_SCHEMA_VERSION, dtype=np.int64
+            ),
+            "dataset_name": np.asarray(str(dataset_name)),
+            "label_type": np.asarray("multilabel" if is_multilabel else "multiclass"),
+            "similarity": np.asarray(protocol["similarity"]),
+            "normalized": np.asarray(bool(normalize)),
+            "candidate_exclusion": np.asarray(protocol["candidate_exclusion"]),
+            "classes": np.asarray([str(value) for value in classes], dtype=str),
+            "ks": np.asarray(ks, dtype=np.int64),
+            "sample_ids": np.asarray(sample_ids, dtype=str),
+            "group_ids": np.asarray(
+                sample_ids if group_ids is None else group_ids, dtype=str
+            ),
+            "unit_query_indices": query_indices,
+            "unit_sample_ids": np.asarray(sample_ids, dtype=str)[query_indices],
+            "unit_group_ids": np.asarray(
+                [unit["group_id"] for unit in all_units], dtype=str
+            ),
+            "unit_label_indices": np.asarray(
+                [unit["label_index"] for unit in all_units], dtype=np.int64
+            ),
+            "eligible": np.asarray(
+                [unit["eligible"] for unit in all_units], dtype=bool
+            ),
+            "exclusion_reasons": np.asarray(
+                [unit["exclusion_reason"] for unit in all_units], dtype=str
+            ),
+            "n_candidates": np.asarray(
+                [unit["n_candidates"] for unit in all_units], dtype=np.int64
+            ),
+            "n_relevant": np.asarray(
+                [unit["n_relevant"] for unit in all_units], dtype=np.int64
+            ),
+            "first_relevant_rank": np.asarray(
+                [unit["first_relevant_rank"] for unit in all_units], dtype=np.int64
+            ),
+            "average_precision": np.asarray(
+                [unit["average_precision"] for unit in all_units], dtype=np.float64
+            ),
+            "n_relevant_at_k": np.asarray([
+                [unit["n_relevant_at_k"][int(k)] for k in ks]
+                for unit in all_units
+            ], dtype=np.int64).reshape(len(all_units), len(ks)),
+            "hit_at_k": np.asarray([
+                [unit["hit_at_k"][int(k)] for k in ks] for unit in all_units
+            ], dtype=bool).reshape(len(all_units), len(ks)),
+            "ordered_sample_ids_sha256": np.asarray(
+                ordered_ids_sha256([str(value) for value in sample_ids])
+            ),
+        }
+        validate_retrieval_artifact(artifact)
+        return artifact
 
-    recall_at_k = {
-        int(K): float(np.mean([q["recall_at_k"][int(K)] for q in per_query]))
-        for K in ks
-    }
-    aps = np.array([q["average_precision"] for q in per_query], dtype = float)
-    mAP = float(np.nanmean(aps)) if len(aps) else np.nan
+    if not evaluation_units:
+        empty_hit_at_k = {int(k): np.nan for k in ks}
+        results = {
+            "n_total": N,
+            "n_eval": 0,
+            "n_excluded_queries": N,
+            "n_evaluation_units": 0,
+            "hit_at_k": empty_hit_at_k,
+            "recall_at_k": dict(empty_hit_at_k),
+            "map": np.nan,
+            "classes": classes,
+            "evaluation_protocol": protocol,
+            "protocol": {
+                "similarity": protocol["similarity"],
+                "normalized": normalize,
+                "relevance": protocol["relevance"],
+                "candidate_exclusion": protocol["candidate_exclusion"],
+                "tuned": False,
+            },
+            "note": "No query has a relevant candidate outside its excluded group.",
+        }
+        artifact = build_artifact()
+        validate_retrieval_summary(artifact, results)
+        return (results, artifact) if return_artifact else results
+
+    aggregate = aggregate_units(evaluation_units)
+    hit_at_k = aggregate["hit_at_k"]
+    recall_at_k = aggregate["recall_at_k"]
+    mAP = aggregate["map"]
 
     # JSON compatible
     results = {
         "n_total": N,
         "n_eval": n_eval,
+        "n_excluded_queries": int(N - n_eval),
+        "n_evaluation_units": int(len(evaluation_units)),
+        "hit_at_k": hit_at_k,
         "recall_at_k": recall_at_k,
         "map": mAP,
         "classes": classes,
-        "evaluation_protocol": {
-            "type": "all_vs_all_retrieval",
-            "ks": [int(k) for k in ks],
-            "similarity": "cosine",
+        "evaluation_protocol": protocol,
+        "protocol": {
+            "similarity": protocol["similarity"],
             "normalized": normalize,
-            "bootstrap": bootstrap,
-            "n_bootstrap": int(n_bootstrap),
-            "ci": int(ci),
-            "random_state": int(random_state),
-            "tuned": False
+            "relevance": protocol["relevance"],
+            "candidate_exclusion": protocol["candidate_exclusion"],
+            "tuned": False,
         },
-        "protocol": {"similarity": "cosine", "normalized": normalize, "tuned": False}
     }
+
+    units_by_label = {
+        label_index: [
+            unit for unit in evaluation_units
+            if unit["label_index"] == label_index
+        ]
+        for label_index in range(len(classes))
+    }
+    if is_multilabel:
+        per_finding = {}
+        for label_index, label_name in enumerate(classes):
+            finding_units = units_by_label[label_index]
+            total_queries = int(np.sum(y[:, label_index] == 1))
+            if not finding_units:
+                per_finding[str(label_name)] = {
+                    "n_total_queries": total_queries,
+                    "n_queries": 0,
+                    "n_excluded_queries": total_queries,
+                    "hit_at_k": {int(k): np.nan for k in ks},
+                    "recall_at_k": {int(k): np.nan for k in ks},
+                    "map": np.nan,
+                }
+                continue
+            finding_metrics = aggregate_units(finding_units)
+            per_finding[str(label_name)] = {
+                "n_total_queries": total_queries,
+                "n_queries": len(finding_units),
+                "n_excluded_queries": total_queries - len(finding_units),
+                **finding_metrics,
+            }
+        populated_findings = [
+            metrics for metrics in per_finding.values()
+            if metrics["n_queries"] > 0
+        ]
+        results["per_finding"] = per_finding
+        results["macro_hit_at_k"] = {
+            int(k): float(np.mean([
+                metrics["hit_at_k"][int(k)] for metrics in populated_findings
+            ]))
+            for k in ks
+        }
+        results["macro_recall_at_k"] = {
+            int(k): float(np.mean([
+                metrics["recall_at_k"][int(k)] for metrics in populated_findings
+            ]))
+            for k in ks
+        }
+        results["macro_map"] = float(np.mean([
+            metrics["map"] for metrics in populated_findings
+        ]))
 
     if bootstrap:
         rng = np.random.default_rng(random_state)
         alpha = (100 - ci) / 2
+        boot_hit = {int(K): [] for K in ks}
         boot_recall = {int(K): [] for K in ks}
         boot_map = []
 
+        units_by_bootstrap_key = {}
+        for unit in evaluation_units:
+            bootstrap_key = (
+                unit["group_id"] if group_ids is not None
+                else str(unit["query_index"])
+            )
+            units_by_bootstrap_key.setdefault(bootstrap_key, []).append(unit)
+        bootstrap_keys = sorted(units_by_bootstrap_key)
+
         for _ in range(n_bootstrap):
-            sample_idx = rng.integers(0, len(per_query), size = len(per_query))
-            sample = [per_query[i] for i in sample_idx]
-            for K in ks:
-                boot_recall[int(K)].append(np.mean([q["recall_at_k"][int(K)] for q in sample]))
-            boot_map.append(np.nanmean([q["average_precision"] for q in sample]))
+            sampled_keys = rng.choice(
+                bootstrap_keys, size=len(bootstrap_keys), replace=True
+            )
+            sampled_units = [
+                unit
+                for bootstrap_key in sampled_keys
+                for unit in units_by_bootstrap_key[bootstrap_key]
+            ]
+            sampled_metrics = aggregate_units(sampled_units)
+            for k in ks:
+                boot_hit[int(k)].append(
+                    sampled_metrics["hit_at_k"][int(k)]
+                )
+                boot_recall[int(k)].append(
+                    sampled_metrics["recall_at_k"][int(k)]
+                )
+            boot_map.append(sampled_metrics["map"])
 
         results["confidence_intervals"] = {
+            "hit_at_k": {
+                int(K): [
+                    float(np.nanpercentile(boot_hit[int(K)], alpha)),
+                    float(np.nanpercentile(boot_hit[int(K)], 100 - alpha))
+                ]
+                for K in ks
+            },
             "recall_at_k": {
                 int(K): [
                     float(np.nanpercentile(boot_recall[int(K)], alpha)),
@@ -1010,29 +1358,46 @@ def retrieval_eval(dataset_name, embeddings, metadata_df, image_paths, id_col, l
             ]
         }
 
-    # Optional per-class Recall@K
-    if per_class:
-        per_cls = {}
-        for c_idx, c_name in enumerate(classes):
-            idx_c = np.where((y == c_idx) & valid)[0]
-            if len(idx_c) == 0:
-                per_cls[c_name] = {int(K): np.nan for K in ks}
+    # Optional per-class Hit@K and Recall@K for multiclass datasets.
+    if per_class and not is_multilabel:
+        hit_per_cls = {}
+        recall_per_cls = {}
+        for class_index, class_name in enumerate(classes):
+            class_units = units_by_label[class_index]
+            if not class_units:
+                empty = {int(k): np.nan for k in ks}
+                hit_per_cls[str(class_name)] = empty
+                recall_per_cls[str(class_name)] = dict(empty)
                 continue
-            per_cls[c_name] = {
-                int(K): float(np.mean([recall_at_k_for_query(i, K) for i in idx_c])) for K in ks
+            class_metrics = aggregate_units(class_units)
+            hit_per_cls[str(class_name)] = {
+                int(k): float(np.mean([
+                    unit["hit_at_k"][int(k)] for unit in class_units
+                ]))
+                for k in ks
             }
-        results["recall_at_k_per_class"] = per_cls
+            recall_per_cls[str(class_name)] = class_metrics["recall_at_k"]
+        results["hit_at_k_per_class"] = hit_per_cls
+        results["recall_at_k_per_class"] = recall_per_cls
 
     # Print summary
-    print(f"Retrieval (all-vs-all, cosine) — evaluated {n_eval}/{N} queries (non-singleton classes).")
+    print(
+        f"Retrieval (cross-group, {protocol['similarity']}) — evaluated "
+        f"{n_eval}/{N} queries "
+        f"across {len(evaluation_units)} relevance units."
+    )
     for K in ks:
+        print(f"  Hit@{K}: {hit_at_k[int(K)]:.4f}")
         print(f"  Recall@{K}: {recall_at_k[int(K)]:.4f}")
     print(f"  mAP      : {mAP:.4f}")
 
-    return results
+    artifact = build_artifact()
+    validate_retrieval_summary(artifact, results)
+    return (results, artifact) if return_artifact else results
 
 def clustering_eval(dataset_name, embeddings, metadata_df, image_paths, id_col, label_col,
-                    k_range = range(2, 15), random_state = 42, compute_silhouette = True):
+                    k_range = range(2, 15), random_state = 42,
+                    compute_silhouette = True, sample_ids = None):
     """
     Run KMeans for multiple numbers of clusters (k_range) and compute ARI/NMI (and silhouette if requested).
 
@@ -1053,7 +1418,7 @@ def clustering_eval(dataset_name, embeddings, metadata_df, image_paths, id_col, 
         results_dict : JSON-compatible summary of the clustering test
     """
     X, y, classes = prepare_data_multiclass(dataset_name, embeddings, metadata_df, image_paths,
-            id_col, label_col)
+            id_col, label_col, sample_ids = sample_ids)
 
     class_count_k = len(classes)
     eval_k_values = sorted(set(k_range) | {class_count_k})
@@ -1123,7 +1488,7 @@ def clustering_eval(dataset_name, embeddings, metadata_df, image_paths, id_col, 
         results_dict["best_silhouette"] = [int(best_k_sil['k']), float(best_k_sil['Silhouette'])]
         results_dict["silhouette_selected_k"] = row_summary(best_k_sil)
 
-    if dataset_name in ("cbis_ddsm", "odir"):
+    if get_dataset_contract(dataset_name).label_type == "multilabel":
         results_dict["note"] = (
             "Clustering classes are unique multilabel combinations and should "
             "be interpreted as exploratory."

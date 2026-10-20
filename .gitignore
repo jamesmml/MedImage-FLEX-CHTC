@@ -7,3 +7,4 @@ manifests/
 configs/
 testbench/scripts/__pycache__/
 conda_envs/
+.cache/
