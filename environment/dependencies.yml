@@ -12,6 +12,7 @@ dependencies:
   - optuna
   - pip
   - pip:
+    - open_clip_torch
     - transformers
     - sentencepiece
     - scikit-learn
