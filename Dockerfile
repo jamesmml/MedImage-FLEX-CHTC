@@ -2,7 +2,7 @@
 FROM ubuntu:22.04
 
 # Install system utilities
-RUN apt-get update && apt-get install -y wget unzip libgomp1 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y wget unzip libgomp1 git && rm -rf /var/lib/apt/lists/*
 
 # Download and install Miniconda
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
@@ -40,9 +40,9 @@ COPY ./environment/* .
 RUN bash ./setup.sh && rm ./setup.sh ./dependencies.yml
 
 # NOTE: Add your model's environment config file
-COPY ./conda_envs/cxr-foundation.yml .
+COPY ./conda_envs/general-model.yml .
 
 # Download the model dependencies
 RUN conda clean --all -y && \
-    conda env update --name base --file ./cxr-foundation.yml && \
-    conda clean --all -y && rm ./cxr-foundation.yml
+    conda env update --name base --file ./general-model.yml && \
+    conda clean --all -y && rm ./general-model.yml

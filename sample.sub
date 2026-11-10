@@ -18,14 +18,15 @@ transfer_input_files = ./testbench, ./model_configs/buckymodel/config.json, osdf
 transfer_output_files = embeddings, results, manifests
 when_to_transfer_output = ON_EXIT_OR_EVICT
 
-# Request hardware
+# Request hardware - edit as needed
 request_gpus = 1
 +GPUJobLength = "medium"
 gpus_minimum_capability = 8.0
+gpus_maximum_capability = 9.0
 
 request_cpus = 8
 request_memory = 128GB
-request_disk = 100GB
+request_disk = 150GB
 
 # Run MedImage-FLEX
 queue
