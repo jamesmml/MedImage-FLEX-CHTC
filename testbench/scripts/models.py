@@ -8,8 +8,8 @@ TensorFlow models are defaulted to using CPU-only
 Device logic (CPU vs GPU) for TF is present in this file, as TF's device(s)
 can only be allocated once
 """
-import json
 import os
+import json
 import numpy as np
 import torch
 from scripts.model_interface import (
@@ -35,6 +35,7 @@ HUGGINGFACE_REVISIONS = {
     "google/vit-base-patch16-224-in21k": (
         "b4569560a39a0f1af58e3ddaf17facf20ab919b0"
     ),
+    "google/cxr-foundation": "e5af8ea44a17bad5504f7e485388d6b05786860f"
 }
 
 def _optional_import_error(model_name, dependency, exc):
@@ -141,10 +142,7 @@ def _build_biomedclip_backend(model_id, device):
 
 
 def _build_cxr_foundation_backend(model_id):
-    revision = _require_revision(
-        os.environ.get("MEDIMAGE_FLEX_CXR_FOUNDATION_REVISION"),
-        "CXR Foundation",
-    )
+    revision = _require_revision(HUGGINGFACE_REVISIONS[model_id], "CXR-Foundation")
     try:
         import tensorflow as tf
         from clientside.clients import HuggingFaceCxrClient
@@ -382,7 +380,7 @@ def build_backend(model_id: str) -> EmbeddingBackend:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return _build_biomedclip_backend(model_id, device)
 
-    if model_id == "cxr-foundation":
+    if model_id == "google/cxr-foundation":
         return _build_cxr_foundation_backend(model_id)
 
     if model_id in {"medflamingo", MED_FLAMINGO_REPO_ID}:
@@ -403,6 +401,23 @@ def build_backend(model_id: str) -> EmbeddingBackend:
             preprocessing_spec=_torchvision_preprocessing_spec(
                 model_id, weights, transform
             ),
+        )
+
+    if model_id == "densenet121":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        weights = models.DenseNet121_Weights.DEFAULT
+        transform = weights.transforms()
+        model = models.densenet121(weights = weights)
+        model.classifier = torch.nn.Identity()
+
+        return TorchvisionBackend(
+            model_id,
+            model,
+            device,
+            transform=transform,
+            preprocessing_spec=_torchvision_preprocessing_spec(
+                model_id, weights, transform
+            )
         )
 
     if model_id == "google/medsiglip-448":
